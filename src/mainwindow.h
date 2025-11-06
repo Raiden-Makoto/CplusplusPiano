@@ -7,14 +7,11 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QAudioSink>
-#include <QAudioFormat>
-#include <QAudioDevice>
-#include <QMediaDevices>
-#include <QIODevice>
 #include <QByteArray>
 #include <QFile>
-#include <QTimer>
+#include <QMutex>
+#include <QVector>
+#include <portaudio.h>
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -31,8 +28,12 @@ private:
     void setupAudio();
     void connectKeySignals();
     QString getAudioFilePath(const QString &note);
-    QByteArray loadWavPcmData(const QString &filePath, QAudioFormat &format);
-    int getAvailableAudioSink();
+    QByteArray loadWavPcmData(const QString &filePath, int &sampleRate, int &channels);
+    static int audioCallback(const void *inputBuffer, void *outputBuffer,
+                            unsigned long framesPerBuffer,
+                            const PaStreamCallbackTimeInfo *timeInfo,
+                            PaStreamCallbackFlags statusFlags,
+                            void *userData);
     
     QWidget *centralWidget;
     QWidget *pianoKeysContainer;  // Container for overlapping white and black keys
@@ -41,14 +42,25 @@ private:
     
     QMap<QString, QPushButton*> pianoKeys;
     QMap<QString, QByteArray> audioBuffers;  // Pre-loaded PCM audio data
-    QList<QAudioSink*> audioSinkPool;  // Pool of audio sinks for overlapping playback
-    QList<QIODevice*> audioDevices;  // Corresponding IO devices for each sink
-    QList<QByteArray> audioStreamBuffers;  // Remaining data to stream for each sink
-    QList<QTimer*> streamTimers;  // Timers to continue streaming data
-    QAudioFormat audioFormat;
-    QAudioDevice audioDevice;
+    QMap<QString, int> audioSampleRates;  // Sample rate for each note
+    QMap<QString, int> audioChannels;  // Channel count for each note
     
-    void streamAudioData(int sinkIndex);
+    // PortAudio
+    PaStream *audioStream;
+    int outputSampleRate;
+    int outputChannels;
+    
+    // Active notes (for mixing)
+    struct ActiveNote {
+        QString note;
+        const qint16 *data;
+        int position;
+        int length;
+        int sampleRate;
+        int channels;
+    };
+    QVector<ActiveNote> activeNotes;
+    QMutex activeNotesMutex;
 };
 
 #endif // MAINWINDOW_H

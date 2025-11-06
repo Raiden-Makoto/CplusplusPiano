@@ -6,24 +6,21 @@
 #include <QList>
 #include <QVBoxLayout>
 #include <QSpacerItem>
-#include <QAudioSink>
-#include <QAudioFormat>
-#include <QAudioDevice>
-#include <QMediaDevices>
-#include <QIODevice>
 #include <QFile>
 #include <QDataStream>
-#include <QTimer>
 #include <QDir>
 #include <QStandardPaths>
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QSet>
-#include <climits>
+#include <QMutex>
+#include <QVector>
+#include <portaudio.h>
+#include <cmath>
 #include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent), audioStream(nullptr), outputSampleRate(44100), outputChannels(2)
 {
     setupUI();  // Must be called first to create pianoKeys
     setupAudio();  // Preload audio files after keys are created
@@ -33,23 +30,12 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Clean up timers
-    for (QTimer *timer : streamTimers) {
-        if (timer) {
-            timer->stop();
-            delete timer;
-        }
+    // Stop and close PortAudio stream
+    if (audioStream) {
+        Pa_StopStream(audioStream);
+        Pa_CloseStream(audioStream);
     }
-    
-    // Clean up audio devices and sinks
-    for (QIODevice *device : audioDevices) {
-        if (device) {
-            device->close();
-        }
-    }
-    for (QAudioSink *sink : audioSinkPool) {
-        delete sink;
-    }
+    Pa_Terminate();
 }
 
 void MainWindow::setupUI()
@@ -234,7 +220,7 @@ void MainWindow::setupUI()
     setCentralWidget(centralWidget);
 }
 
-QByteArray MainWindow::loadWavPcmData(const QString &filePath, QAudioFormat &format)
+QByteArray MainWindow::loadWavPcmData(const QString &filePath, int &sampleRate, int &channels)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -262,7 +248,7 @@ QByteArray MainWindow::loadWavPcmData(const QString &filePath, QAudioFormat &for
     char chunkId[4];
     quint32 chunkSize;
     quint16 audioFormat, numChannels;
-    quint32 sampleRate, byteRate;
+    quint32 fileSampleRate, byteRate;
     quint16 blockAlign, bitsPerSample;
     
     bool foundFmt = false;
@@ -273,20 +259,18 @@ QByteArray MainWindow::loadWavPcmData(const QString &filePath, QAudioFormat &for
         if (QByteArray(chunkId, 4) == "fmt ") {
             stream >> audioFormat;  // Should be 1 for PCM
             stream >> numChannels;
-            stream >> sampleRate;
+            stream >> fileSampleRate;
             stream >> byteRate;
             stream >> blockAlign;
             stream >> bitsPerSample;
             
-            // Set the audio format
-            format.setSampleRate(sampleRate);
-            format.setChannelCount(numChannels);
-            if (bitsPerSample == 16) {
-                format.setSampleFormat(QAudioFormat::Int16);
-            } else if (bitsPerSample == 8) {
-                format.setSampleFormat(QAudioFormat::UInt8);
-            } else {
-                format.setSampleFormat(QAudioFormat::Int16);  // Default
+            sampleRate = fileSampleRate;
+            channels = numChannels;
+            
+            if (bitsPerSample != 16) {
+                qWarning() << "Only 16-bit PCM is supported:" << filePath;
+                file.close();
+                return QByteArray();
             }
             
             foundFmt = true;
@@ -342,10 +326,14 @@ QByteArray MainWindow::loadWavPcmData(const QString &filePath, QAudioFormat &for
 
 void MainWindow::setupAudio()
 {
-    // Get default audio output device
-    audioDevice = QMediaDevices::defaultAudioOutput();
+    // Initialize PortAudio
+    PaError err = Pa_Initialize();
+    if (err != paNoError) {
+        qWarning() << "PortAudio initialization failed:" << Pa_GetErrorText(err);
+        return;
+    }
     
-    // Load first audio file to determine format
+    // Load all audio files and determine common format
     QSet<QString> uniqueNotes;
     for (auto it = pianoKeys.begin(); it != pianoKeys.end(); ++it) {
         QString keyId = it.key();
@@ -353,52 +341,11 @@ void MainWindow::setupAudio()
         uniqueNotes.insert(note);
     }
     
-    // Determine audio format from first file
-    if (!uniqueNotes.isEmpty()) {
-        QString firstNote = *uniqueNotes.begin();
-        QString wavPath = getAudioFilePath(firstNote);
-        QFileInfo fileInfo(wavPath);
-        
-        if (fileInfo.exists()) {
-            QAudioFormat tempFormat;
-            QByteArray testData = loadWavPcmData(wavPath, tempFormat);
-            if (!testData.isEmpty()) {
-                audioFormat = tempFormat;
-                qDebug() << "Audio format from file:"
-                         << "SampleRate:" << audioFormat.sampleRate()
-                         << "Channels:" << audioFormat.channelCount()
-                         << "SampleFormat:" << audioFormat.sampleFormat();
-            }
-        }
-    }
-    
-    // Fallback to default format if we couldn't determine it
-    if (audioFormat.sampleRate() == 0) {
-        audioFormat.setSampleRate(44100);
-        audioFormat.setChannelCount(2);
-        audioFormat.setSampleFormat(QAudioFormat::Int16);
-    }
-    
-    // Check if format is supported, adjust if needed
-    if (!audioDevice.isFormatSupported(audioFormat)) {
-        qWarning() << "Audio format not supported, using preferred format";
-        audioFormat = audioDevice.preferredFormat();
-    }
-    
-    // Create a pool of audio sinks for overlapping playback
-    // Each sink can play one sound at a time, so we need multiple for overlapping
-    const int sinkPoolSize = 20;  // Allow up to 20 simultaneous sounds
-    for (int i = 0; i < sinkPoolSize; ++i) {
-        QAudioSink *sink = new QAudioSink(audioDevice, audioFormat, this);
-        sink->setVolume(0.5f);
-        QIODevice *device = sink->start();
-        audioSinkPool.append(sink);
-        audioDevices.append(device);
-        audioStreamBuffers.append(QByteArray());  // Empty buffer initially
-        streamTimers.append(nullptr);  // No timer initially
-    }
-    
     // Preload all audio files into memory as PCM data
+    int commonSampleRate = 44100;
+    int commonChannels = 2;
+    bool firstFile = true;
+    
     for (const QString &note : uniqueNotes) {
         QString wavPath = getAudioFilePath(note);
         QFileInfo fileInfo(wavPath);
@@ -408,16 +355,73 @@ void MainWindow::setupAudio()
             continue;
         }
         
-        // Load WAV file and extract PCM data (format should match)
-        QAudioFormat fileFormat;
-        QByteArray pcmData = loadWavPcmData(wavPath, fileFormat);
+        // Load WAV file and extract PCM data
+        int sampleRate, channels;
+        QByteArray pcmData = loadWavPcmData(wavPath, sampleRate, channels);
         if (!pcmData.isEmpty()) {
             audioBuffers[note] = pcmData;
+            audioSampleRates[note] = sampleRate;
+            audioChannels[note] = channels;
+            
+            // Use the first file's format as the common format
+            if (firstFile) {
+                commonSampleRate = sampleRate;
+                commonChannels = channels;
+                firstFile = false;
+            }
         }
     }
     
+    outputSampleRate = commonSampleRate;
+    outputChannels = commonChannels;
+    
     qDebug() << "Preloaded" << audioBuffers.size() << "audio files into memory";
-    qDebug() << "Created" << audioSinkPool.size() << "audio sinks for overlapping playback";
+    qDebug() << "Audio format: SampleRate:" << outputSampleRate << "Channels:" << outputChannels;
+    
+    // Open PortAudio stream with low latency settings
+    PaStreamParameters outputParameters;
+    outputParameters.device = Pa_GetDefaultOutputDevice();
+    if (outputParameters.device == paNoDevice) {
+        qWarning() << "No default output device found";
+        Pa_Terminate();
+        return;
+    }
+    
+    outputParameters.channelCount = outputChannels;
+    outputParameters.sampleFormat = paInt16;
+    outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
+    outputParameters.hostApiSpecificStreamInfo = nullptr;
+    
+    // Use a small buffer size for low latency (64 frames = ~1.5ms at 44.1kHz)
+    unsigned long framesPerBuffer = 64;
+    
+    err = Pa_OpenStream(
+        &audioStream,
+        nullptr,  // No input
+        &outputParameters,
+        outputSampleRate,
+        framesPerBuffer,
+        paClipOff,  // Don't clip, we'll handle mixing
+        audioCallback,
+        this  // Pass this as userData
+    );
+    
+    if (err != paNoError) {
+        qWarning() << "PortAudio stream open failed:" << Pa_GetErrorText(err);
+        Pa_Terminate();
+        return;
+    }
+    
+    // Start the stream
+    err = Pa_StartStream(audioStream);
+    if (err != paNoError) {
+        qWarning() << "PortAudio stream start failed:" << Pa_GetErrorText(err);
+        Pa_CloseStream(audioStream);
+        Pa_Terminate();
+        return;
+    }
+    
+    qDebug() << "PortAudio stream started with latency:" << outputParameters.suggestedLatency * 1000 << "ms";
 }
 
 QString MainWindow::getAudioFilePath(const QString &note)
@@ -474,101 +478,80 @@ QString MainWindow::getAudioFilePath(const QString &note)
     return possiblePaths.first();
 }
 
-int MainWindow::getAvailableAudioSink()
+int MainWindow::audioCallback(const void *inputBuffer, void *outputBuffer,
+                              unsigned long framesPerBuffer,
+                              const PaStreamCallbackTimeInfo *timeInfo,
+                              PaStreamCallbackFlags statusFlags,
+                              void *userData)
 {
-    // First, try to find a completely idle sink (best case)
-    for (int i = 0; i < audioSinkPool.size(); ++i) {
-        QIODevice *device = audioDevices[i];
-        if (!device) continue;
-        
-        // Completely idle: no buffer, no timer, minimal queued data
-        bool bufferEmpty = audioStreamBuffers[i].isEmpty();
-        bool timerInactive = !streamTimers[i] || !streamTimers[i]->isActive();
-        bool deviceReady = device->bytesToWrite() < 5000;  // Less than 5KB queued
-        
-        if (bufferEmpty && timerInactive && deviceReady) {
-            return i;
-        }
+    Q_UNUSED(inputBuffer);
+    Q_UNUSED(timeInfo);
+    Q_UNUSED(statusFlags);
+    
+    MainWindow *mainWindow = static_cast<MainWindow*>(userData);
+    qint16 *out = static_cast<qint16*>(outputBuffer);
+    
+    // Clear output buffer
+    int samplesPerFrame = mainWindow->outputChannels;
+    unsigned long totalSamples = framesPerBuffer * samplesPerFrame;
+    for (unsigned long i = 0; i < totalSamples; ++i) {
+        out[i] = 0;
     }
     
-    // If no completely idle sink, find one that's nearly done
-    // (has little data left to play)
-    for (int i = 0; i < audioSinkPool.size(); ++i) {
-        QIODevice *device = audioDevices[i];
-        if (!device) continue;
+    // Lock the active notes list
+    QMutexLocker locker(&mainWindow->activeNotesMutex);
+    
+    // Mix all active notes
+    for (int i = mainWindow->activeNotes.size() - 1; i >= 0; --i) {
+        ActiveNote &activeNote = mainWindow->activeNotes[i];
         
-        // Nearly done: small buffer remaining and little queued
-        bool smallBuffer = audioStreamBuffers[i].size() < 50000;  // Less than 50KB remaining
-        bool littleQueued = device->bytesToWrite() < 20000;  // Less than 20KB queued
+        // Calculate how many samples we need from this note
+        int noteSamplesPerFrame = activeNote.channels;
+        unsigned long noteSamplesNeeded = framesPerBuffer * noteSamplesPerFrame;
+        int noteSamplesAvailable = activeNote.length - activeNote.position;
+        unsigned long samplesToMix = qMin(static_cast<unsigned long>(noteSamplesAvailable), noteSamplesNeeded);
         
-        if (smallBuffer && littleQueued) {
-            // This sink is nearly done, we can interrupt it
-            if (streamTimers[i]) {
-                streamTimers[i]->stop();
+        // Handle sample rate conversion if needed (simple linear interpolation)
+        if (activeNote.sampleRate == mainWindow->outputSampleRate && 
+            activeNote.channels == mainWindow->outputChannels) {
+            // Same sample rate and channels - direct mixing (interleaved)
+            for (unsigned long j = 0; j < samplesToMix; ++j) {
+                int noteIndex = activeNote.position + static_cast<int>(j);
+                if (j < totalSamples && noteIndex < activeNote.length) {
+                    // Mix with clipping protection
+                    qint32 mixed = static_cast<qint32>(out[j]) + static_cast<qint32>(activeNote.data[noteIndex]);
+                    out[j] = static_cast<qint16>(qBound(-32768, mixed, 32767));
+                }
             }
-            audioStreamBuffers[i].clear();
-            return i;
+            activeNote.position += static_cast<int>(samplesToMix);
+        } else {
+            // Sample rate conversion needed (simplified - for production use proper resampling)
+            double ratio = static_cast<double>(activeNote.sampleRate) / mainWindow->outputSampleRate;
+            for (unsigned long frame = 0; frame < framesPerBuffer; ++frame) {
+                double noteFrame = activeNote.position / static_cast<double>(noteSamplesPerFrame) + frame * ratio;
+                int noteSampleIndex = static_cast<int>(noteFrame * noteSamplesPerFrame);
+                
+                if (noteSampleIndex < activeNote.length) {
+                    for (int ch = 0; ch < samplesPerFrame && ch < noteSamplesPerFrame; ++ch) {
+                        unsigned long outIndex = frame * samplesPerFrame + ch;
+                        int noteIndex = noteSampleIndex + ch;
+                        if (outIndex < totalSamples && noteIndex < activeNote.length) {
+                            qint32 mixed = static_cast<qint32>(out[outIndex]) + static_cast<qint32>(activeNote.data[noteIndex]);
+                            out[outIndex] = static_cast<qint16>(qBound(-32768, mixed, 32767));
+                        }
+                    }
+                }
+            }
+            activeNote.position += static_cast<int>(framesPerBuffer * ratio * noteSamplesPerFrame);
         }
-    }
-    
-    // If all sinks are busy, find the one with the least total data
-    // (buffer + queued bytes) - this allows rapid presses
-    int bestIndex = -1;
-    qint64 minTotalData = LLONG_MAX;
-    for (int i = 0; i < audioSinkPool.size(); ++i) {
-        QIODevice *device = audioDevices[i];
-        if (!device) continue;
         
-        qint64 totalData = audioStreamBuffers[i].size() + device->bytesToWrite();
-        if (totalData < minTotalData) {
-            minTotalData = totalData;
-            bestIndex = i;
+        // Remove note if it's finished
+        if (activeNote.position >= activeNote.length) {
+            mainWindow->activeNotes.removeAt(i);
         }
     }
     
-    if (bestIndex >= 0) {
-        // Interrupt this sink and use it for the new note
-        if (streamTimers[bestIndex]) {
-            streamTimers[bestIndex]->stop();
-        }
-        audioStreamBuffers[bestIndex].clear();
-        return bestIndex;
-    }
-    
-    return -1;
-}
-
-void MainWindow::streamAudioData(int sinkIndex)
-{
-    if (sinkIndex < 0 || sinkIndex >= audioSinkPool.size()) {
-        return;
-    }
-    
-    QIODevice *device = audioDevices[sinkIndex];
-    if (!device) {
-        return;
-    }
-    
-    QByteArray &buffer = audioStreamBuffers[sinkIndex];
-    if (buffer.isEmpty()) {
-        // Done streaming, stop the timer
-        if (streamTimers[sinkIndex]) {
-            streamTimers[sinkIndex]->stop();
-        }
-        return;
-    }
-    
-    // Write a chunk of data (enough to fill the buffer)
-    // The audio device buffer is typically small, so we write in chunks
-    const int chunkSize = 8192;  // 8KB chunks
-    QByteArray chunk = buffer.left(chunkSize);
-    buffer.remove(0, chunk.size());
-    
-    qint64 written = device->write(chunk);
-    if (written < chunk.size()) {
-        // Buffer is full, put the data back and try again later
-        buffer.prepend(chunk.mid(written));
-    }
+    return paContinue;
 }
 
 void MainWindow::playNote(const QString &note)
@@ -578,34 +561,31 @@ void MainWindow::playNote(const QString &note)
         return;
     }
     
-    // Get an available audio sink from the pool
-    int sinkIndex = getAvailableAudioSink();
-    if (sinkIndex < 0) {
-        qWarning() << "No available audio sink";
+    QByteArray audioData = audioBuffers[note];
+    if (audioData.isEmpty()) {
         return;
     }
     
-    QIODevice *device = audioDevices[sinkIndex];
-    if (!device) {
-        qWarning() << "No device for sink";
-        return;
-    }
+    // Get audio format for this note
+    int sampleRate = audioSampleRates.value(note, outputSampleRate);
+    int channels = audioChannels.value(note, outputChannels);
     
-    // Copy the audio data to the stream buffer for this sink
-    audioStreamBuffers[sinkIndex] = audioBuffers[note];
+    // Convert QByteArray to const qint16* pointer
+    const qint16 *pcmData = reinterpret_cast<const qint16*>(audioData.constData());
+    int sampleCount = audioData.size() / sizeof(qint16);
     
-    // Create or reuse a timer to stream the data
-    if (!streamTimers[sinkIndex]) {
-        QTimer *timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, [this, sinkIndex]() {
-            streamAudioData(sinkIndex);
-        });
-        streamTimers[sinkIndex] = timer;
-    }
+    // Create active note
+    ActiveNote activeNote;
+    activeNote.note = note;
+    activeNote.data = pcmData;
+    activeNote.position = 0;
+    activeNote.length = sampleCount;
+    activeNote.sampleRate = sampleRate;
+    activeNote.channels = channels;
     
-    // Start streaming immediately and continue with timer
-    streamAudioData(sinkIndex);
-    streamTimers[sinkIndex]->start(10);  // Check every 10ms to continue streaming
+    // Add to active notes list (thread-safe)
+    QMutexLocker locker(&activeNotesMutex);
+    activeNotes.append(activeNote);
 }
 
 void MainWindow::connectKeySignals()

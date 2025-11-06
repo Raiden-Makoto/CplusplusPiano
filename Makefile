@@ -14,10 +14,10 @@ EQ            = =
 
 CC            = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
 CXX           = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++
-DEFINES       = -DQT_NO_DEBUG -DQT_WIDGETS_LIB -DQT_MULTIMEDIA_LIB -DQT_GUI_LIB -DQT_NETWORK_LIB -DQT_CORE_LIB
+DEFINES       = -DQT_NO_DEBUG -DQT_WIDGETS_LIB -DQT_GUI_LIB -DQT_CORE_LIB
 CFLAGS        = -pipe -O2 $(EXPORT_ARCH_ARGS) -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk -mmacosx-version-min=14.0 -Wall -Wextra $(DEFINES)
 CXXFLAGS      = -pipe -stdlib=libc++ -O2 -std=gnu++1z $(EXPORT_ARCH_ARGS) -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk -mmacosx-version-min=14.0 -Wall -Wextra $(DEFINES)
-INCPATH       = -I. -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtMultimedia.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtNetwork.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -Ibuild/moc -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/System/Library/Frameworks/OpenGL.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/System/Library/Frameworks/OpenGL.framework/Headers -I/opt/homebrew/share/qt/mkspecs/macx-clang -F/opt/homebrew/lib
+INCPATH       = -I. -I/opt/homebrew/opt/portaudio/include -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -Ibuild/moc -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/System/Library/Frameworks/OpenGL.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/System/Library/Frameworks/OpenGL.framework/Headers -I/opt/homebrew/share/qt/mkspecs/macx-clang -F/opt/homebrew/lib
 QMAKE         = /opt/homebrew/bin/qmake
 DEL_FILE      = rm -f
 CHK_DIR_EXISTS= test -d
@@ -40,7 +40,7 @@ DISTNAME      = CplusplusPiano1.0.0
 DISTDIR = /Users/maxcui/Downloads/CplusplusPiano/build/obj/CplusplusPiano1.0.0
 LINK          = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++
 LFLAGS        = -stdlib=libc++ -headerpad_max_install_names $(EXPORT_ARCH_ARGS) -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk -mmacosx-version-min=14.0 -Wl,-rpath,@executable_path/../Frameworks -Wl,-rpath,/opt/homebrew/lib
-LIBS          = $(SUBLIBS) -F/opt/homebrew/lib -framework QtWidgets -framework QtMultimedia -framework QtGui -framework AppKit -framework ImageIO -framework Metal -framework QtNetwork -framework QtCore -framework IOKit -framework DiskArbitration -framework UniformTypeIdentifiers -framework OpenGL   
+LIBS          = $(SUBLIBS) -F/opt/homebrew/lib -L/opt/homebrew/opt/portaudio/lib -lportaudio -framework QtWidgets -framework QtGui -framework AppKit -framework ImageIO -framework Metal -framework QtCore -framework IOKit -framework DiskArbitration -framework UniformTypeIdentifiers -framework OpenGL   
 AR            = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar cq
 RANLIB        = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib -s
 SED           = sed
@@ -825,9 +825,7 @@ Makefile: CplusplusPiano.pro /opt/homebrew/share/qt/mkspecs/macx-clang/qmake.con
 		/opt/homebrew/share/qt/mkspecs/features/lex.prf \
 		CplusplusPiano.pro \
 		/opt/homebrew/lib/QtWidgets.framework/Resources/QtWidgets.prl \
-		/opt/homebrew/lib/QtMultimedia.framework/Resources/QtMultimedia.prl \
 		/opt/homebrew/lib/QtGui.framework/Resources/QtGui.prl \
-		/opt/homebrew/lib/QtNetwork.framework/Resources/QtNetwork.prl \
 		/opt/homebrew/lib/QtCore.framework/Resources/QtCore.prl
 	$(QMAKE) -o Makefile CplusplusPiano.pro
 /opt/homebrew/share/qt/mkspecs/features/spec_pre.prf:
@@ -1202,9 +1200,7 @@ Makefile: CplusplusPiano.pro /opt/homebrew/share/qt/mkspecs/macx-clang/qmake.con
 /opt/homebrew/share/qt/mkspecs/features/lex.prf:
 CplusplusPiano.pro:
 /opt/homebrew/lib/QtWidgets.framework/Resources/QtWidgets.prl:
-/opt/homebrew/lib/QtMultimedia.framework/Resources/QtMultimedia.prl:
 /opt/homebrew/lib/QtGui.framework/Resources/QtGui.prl:
-/opt/homebrew/lib/QtNetwork.framework/Resources/QtNetwork.prl:
 /opt/homebrew/lib/QtCore.framework/Resources/QtCore.prl:
 qmake: FORCE
 	@$(QMAKE) -o Makefile CplusplusPiano.pro
@@ -1282,25 +1278,18 @@ build/moc/moc_mainwindow.cpp: src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
-		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
 		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
 		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
-		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QMutex \
+		/opt/homebrew/lib/QtCore.framework/Headers/qmutex.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QVector \
+		/opt/homebrew/lib/QtCore.framework/Headers/qvector.h \
+		/opt/homebrew/opt/portaudio/include/portaudio.h \
 		build/moc/moc_predefs.h \
 		/opt/homebrew/share/qt/libexec/moc
-	/opt/homebrew/share/qt/libexec/moc $(DEFINES) --include /Users/maxcui/Downloads/CplusplusPiano/build/moc/moc_predefs.h -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/Users/maxcui/Downloads/CplusplusPiano -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtMultimedia.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtNetwork.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/opt/homebrew/lib src/mainwindow.h -o build/moc/moc_mainwindow.cpp
+	/opt/homebrew/share/qt/libexec/moc $(DEFINES) --include /Users/maxcui/Downloads/CplusplusPiano/build/moc/moc_predefs.h -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/Users/maxcui/Downloads/CplusplusPiano -I/opt/homebrew/opt/portaudio/include -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/opt/homebrew/lib src/mainwindow.h -o build/moc/moc_mainwindow.cpp
 
 compiler_moc_objc_header_make_all:
 compiler_moc_objc_header_clean:
@@ -1332,22 +1321,15 @@ build/obj/main.o: src/main.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
-		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
 		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
 		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
-		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QMutex \
+		/opt/homebrew/lib/QtCore.framework/Headers/qmutex.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QVector \
+		/opt/homebrew/lib/QtCore.framework/Headers/qvector.h \
+		/opt/homebrew/opt/portaudio/include/portaudio.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QApplication \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qapplication.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/main.o src/main.cpp
@@ -1364,22 +1346,15 @@ build/obj/mainwindow.o: src/mainwindow.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
-		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
 		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
 		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
-		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QMutex \
+		/opt/homebrew/lib/QtCore.framework/Headers/qmutex.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QVector \
+		/opt/homebrew/lib/QtCore.framework/Headers/qvector.h \
+		/opt/homebrew/opt/portaudio/include/portaudio.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QLabel \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qlabel.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/Qt \
