@@ -177,11 +177,40 @@ void MainWindow::setupUI()
     
     mainLayout->addWidget(pianoKeysContainer);
     
+    // Add pedal indicators
+    QHBoxLayout *pedalLayout = new QHBoxLayout();
+    pedalLayout->setAlignment(Qt::AlignCenter);
+    pedalLayout->setSpacing(20);
+    
+    unaCordaIndicator = new QCheckBox("Una Corda (Soft Pedal) - N", centralWidget);
+    unaCordaIndicator->setEnabled(false);  // Disable interaction, just show state
+    unaCordaIndicator->setChecked(false);
+    unaCordaIndicator->setStyleSheet(
+        "QCheckBox {"
+        "  font-size: 14px;"
+        "  padding: 5px;"
+        "}"
+    );
+    pedalLayout->addWidget(unaCordaIndicator);
+    
+    damperPedalIndicator = new QCheckBox("Damper Pedal (Sustain) - M", centralWidget);
+    damperPedalIndicator->setEnabled(false);  // Disable interaction, just show state
+    damperPedalIndicator->setChecked(false);
+    damperPedalIndicator->setStyleSheet(
+        "QCheckBox {"
+        "  font-size: 14px;"
+        "  padding: 5px;"
+        "}"
+    );
+    pedalLayout->addWidget(damperPedalIndicator);
+    
+    mainLayout->addLayout(pedalLayout);
+    
     // Resize window to fit the piano keys with symmetric margins
     // Add small symmetric padding to account for window frame
     int padding = 10;  // Symmetric padding on both sides
     int windowWidth = containerWidth + (padding * 2);
-    int windowHeight = whiteKeyHeight + 80;  // Taller window, add space for title
+    int windowHeight = whiteKeyHeight + 120;  // Taller window, add space for title and pedal indicators
     resize(windowWidth, windowHeight);
     
     // Center the piano container horizontally with symmetric margins
@@ -875,17 +904,22 @@ void MainWindow::connectKeySignals()
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
-    // Check for Left Shift (una corda / soft pedal)
-    // On macOS, Left Shift native key code is 0x38, Right Shift is 0x3C
-    if (event->key() == Qt::Key_Shift) {
-        quint32 nativeKey = event->nativeVirtualKey();
-        if (nativeKey == 0x38) {  // Left Shift on macOS
-            QMutexLocker lock(&unaCordaMutex);
-            unaCordaActive = true;
-        } else if (nativeKey == 0x3C) {  // Right Shift on macOS (damper pedal)
-            QMutexLocker lock(&damperPedalMutex);
-            damperPedalActive = true;
-        }
+    // Check for pedal keys: N for una corda, M for damper pedal
+    int key = event->key();
+    if (key == Qt::Key_N) {
+        // Una corda (soft pedal)
+        QMutexLocker lock(&unaCordaMutex);
+        unaCordaActive = true;
+        unaCordaIndicator->setChecked(true);
+        event->accept();
+        return;
+    } else if (key == Qt::Key_M) {
+        // Damper pedal (sustain)
+        QMutexLocker lock(&damperPedalMutex);
+        damperPedalActive = true;
+        damperPedalIndicator->setChecked(true);
+        event->accept();
+        return;
     }
     
     // Map keyboard keys to piano notes
@@ -895,7 +929,7 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     // Third octave (C5-B5): asdfg row - a=C, s=C#, d=D, f=D#, g=E, h=F, j=F#, k=G, l=G#, ;=A, '=A#, \=B
     
     QString note;
-    int key = event->key();
+    // key variable already defined above for pedal checking
     
     // First octave (C3-B3) - number row in order
     if (key == Qt::Key_1) note = "C3";
@@ -954,16 +988,22 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
 void MainWindow::keyReleaseEvent(QKeyEvent *event)
 {
-    // Check for Shift release (una corda or damper pedal)
-    if (event->key() == Qt::Key_Shift) {
-        quint32 nativeKey = event->nativeVirtualKey();
-        if (nativeKey == 0x38) {  // Left Shift on macOS (una corda)
-            QMutexLocker lock(&unaCordaMutex);
-            unaCordaActive = false;
-        } else if (nativeKey == 0x3C) {  // Right Shift on macOS (damper pedal)
-            QMutexLocker lock(&damperPedalMutex);
-            damperPedalActive = false;
-        }
+    // Check for pedal key release: N for una corda, M for damper pedal
+    int key = event->key();
+    if (key == Qt::Key_N) {
+        // Una corda (soft pedal) released
+        QMutexLocker lock(&unaCordaMutex);
+        unaCordaActive = false;
+        unaCordaIndicator->setChecked(false);
+        event->accept();
+        return;
+    } else if (key == Qt::Key_M) {
+        // Damper pedal (sustain) released
+        QMutexLocker lock(&damperPedalMutex);
+        damperPedalActive = false;
+        damperPedalIndicator->setChecked(false);
+        event->accept();
+        return;
     }
     
     QMainWindow::keyReleaseEvent(event);

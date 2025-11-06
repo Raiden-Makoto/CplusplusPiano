@@ -12,6 +12,8 @@
 #include <QMutex>
 #include <QVector>
 #include <QKeyEvent>
+#include <QCheckBox>
+#include <QHBoxLayout>
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 
@@ -46,6 +48,10 @@ private:
     QWidget *pianoKeysContainer;  // Container for overlapping white and black keys
     QVBoxLayout *mainLayout;
     QHBoxLayout *whiteKeysLayout;
+    
+    // Pedal indicators
+    QCheckBox *unaCordaIndicator;
+    QCheckBox *damperPedalIndicator;
     
     QMap<QString, QPushButton*> pianoKeys;
     QMap<QString, QByteArray> audioBuffers;  // Pre-loaded PCM audio data
