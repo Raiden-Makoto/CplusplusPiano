@@ -66,6 +66,7 @@ private:
         int channels;
         bool isSustained;  // True if note is being sustained by damper pedal
         double sustainVolume;  // Current volume multiplier for sustained notes (for fade-out)
+        int framesPlayed;  // Number of frames played so far (for 1-second cutoff)
     };
     QVector<ActiveNote> activeNotes;
     QMutex activeNotesMutex;

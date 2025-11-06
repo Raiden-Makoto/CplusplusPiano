@@ -32,6 +32,7 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Enable keyboard focus so keyPressEvent works
     setFocusPolicy(Qt::StrongFocus);
+    setFocus();  // Ensure window has focus to receive keyboard events
     
     // Initialize low-pass filter state (one per channel)
     lowPassFilterState.resize(outputChannels);
@@ -635,7 +636,7 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
         
         // Check if note has reached the end of its sample data
         if (activeNote.position >= activeNote.length) {
-            // If damper pedal is active, sustain the note (fade out slowly)
+            // If damper pedal is active, sustain it immediately
             if (damperActive && !activeNote.isSustained) {
                 activeNote.isSustained = true;
                 activeNote.sustainVolume = 1.0;  // Start at full volume
@@ -643,35 +644,28 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
             
             // If note is sustained, apply fade-out
             if (activeNote.isSustained) {
+                // Calculate fade rate based on damper state
+                double fadeRate;
                 if (damperActive) {
-                    // While damper is held, sustain at current volume (very slow fade for more noticeable sustain)
-                    // Fade out over ~5 seconds (44100 * 5 samples) - much longer for more noticeable effect
-                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 5.0);
-                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - fadeRate);
+                    // While damper is held, very slow fade (over ~5 seconds)
+                    fadeRate = 1.0 / (mainWindow->outputSampleRate * 5.0);
                 } else {
-                    // Damper released - fade out over ~1 second (slower than before for more noticeable release)
-                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
-                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - fadeRate);
+                    // Damper released - faster fade (over ~0.5 seconds for quick release)
+                    fadeRate = 1.0 / (mainWindow->outputSampleRate * 0.5);
                 }
                 
-                // Remove note when volume reaches zero
-                if (activeNote.sustainVolume <= 0.0) {
-                    mainWindow->activeNotes.removeAt(i);
-                    continue;
-                }
-                
-                // For sustained notes, use the last sample value and apply volume
+                // For sustained notes, use the last sample of the audio
                 // Apply 1.1x volume multiplier to make sustain more noticeable
                 double sustainVolumeMultiplier = 1.1;
+                // Use the last sample of the audio for sustain
                 int lastSampleIndex = activeNote.length - activeNote.channels;
+                if (lastSampleIndex < 0) lastSampleIndex = 0;
+                
+                // Render sustained note with per-frame volume decay
                 for (UInt32 frame = 0; frame < framesPerBuffer; ++frame) {
-                    // Calculate current volume for this frame (exponential decay)
-                    double frameVolume = activeNote.sustainVolume * sustainVolumeMultiplier;
-                    if (!damperActive) {
-                        // Faster decay when damper is released
-                        double decayRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
-                        frameVolume = qMax(0.0, (activeNote.sustainVolume - (decayRate * frame)) * sustainVolumeMultiplier);
-                    }
+                    // Calculate current volume for this frame (linear decay)
+                    double currentVolume = activeNote.sustainVolume;
+                    double frameVolume = currentVolume * sustainVolumeMultiplier;
                     
                     for (int ch = 0; ch < activeNote.channels && ch < samplesPerFrame; ++ch) {
                         if (lastSampleIndex + ch < activeNote.length) {
@@ -682,14 +676,15 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
                             }
                         }
                     }
+                    
+                    // Update volume for next frame (decay per frame)
+                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - fadeRate);
                 }
-                // Update sustain volume for next callback
-                if (damperActive) {
-                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 5.0);
-                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - (fadeRate * framesPerBuffer));
-                } else {
-                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
-                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - (fadeRate * framesPerBuffer));
+                
+                // Remove note when volume reaches zero
+                if (activeNote.sustainVolume <= 0.0) {
+                    mainWindow->activeNotes.removeAt(i);
+                    continue;
                 }
                 continue;
             } else {
@@ -699,9 +694,37 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
             }
         }
         
+        // If damper pedal is active, mark note to be sustained (but continue playing normally)
+        // The note will sustain when it reaches the end of its sample data
+        if (damperActive && !activeNote.isSustained) {
+            // Mark as "will be sustained" - note continues playing normally
+            // When it reaches the end, it will start sustaining
+            activeNote.isSustained = true;
+            activeNote.sustainVolume = 1.0;
+        }
+        
+        // Note: If isSustained is true but position < length, the note is still playing
+        // and will continue to play normally. It will only start sustaining when
+        // position >= length (handled in the check above)
+        
+        // Check if note has reached 1 second cutoff (only if damper is NOT active and not sustained)
+        if (activeNote.framesPlayed >= mainWindow->outputSampleRate && !damperActive && !activeNote.isSustained) {
+            // Note has played for 1 second and damper is not active - cut it off
+            mainWindow->activeNotes.removeAt(i);
+            continue;
+        }
+        
+        // Calculate how many frames we can still play before hitting 1 second limit
+        int framesRemaining = mainWindow->outputSampleRate - activeNote.framesPlayed;
+        UInt32 framesToPlay = framesPerBuffer;
+        if (!damperActive && framesRemaining > 0 && framesRemaining < static_cast<int>(framesPerBuffer)) {
+            // Limit to remaining frames before 1 second cutoff
+            framesToPlay = static_cast<UInt32>(framesRemaining);
+        }
+        
         // Calculate how many samples we need from this note
         int noteSamplesPerFrame = activeNote.channels;
-        UInt32 noteSamplesNeeded = framesPerBuffer * noteSamplesPerFrame;
+        UInt32 noteSamplesNeeded = framesToPlay * noteSamplesPerFrame;
         int noteSamplesAvailable = activeNote.length - activeNote.position;
         UInt32 samplesToMix = qMin(static_cast<UInt32>(noteSamplesAvailable), noteSamplesNeeded);
         
@@ -726,7 +749,7 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
         } else {
             // Sample rate conversion needed (simplified)
             double ratio = static_cast<double>(activeNote.sampleRate) / mainWindow->outputSampleRate;
-            for (UInt32 frame = 0; frame < framesPerBuffer; ++frame) {
+            for (UInt32 frame = 0; frame < framesToPlay; ++frame) {
                 double noteFrame = activeNote.position / static_cast<double>(noteSamplesPerFrame) + frame * ratio;
                 int noteSampleIndex = static_cast<int>(noteFrame * noteSamplesPerFrame);
                 
@@ -740,11 +763,18 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
                     }
                 }
             }
-            activeNote.position += static_cast<int>(framesPerBuffer * ratio * noteSamplesPerFrame);
+            activeNote.position += static_cast<int>(framesToPlay * ratio * noteSamplesPerFrame);
         }
         
-        // Note is still playing, continue to next note
-        // (Finished notes are handled above in the position >= length check)
+        // Update frames played counter
+        activeNote.framesPlayed += framesToPlay;
+        
+        // Check again if we've hit 1 second after updating (only if damper is NOT active)
+        if (activeNote.framesPlayed >= mainWindow->outputSampleRate && !damperActive && !activeNote.isSustained) {
+            // Cut it off (damper is not active, so no sustain)
+            mainWindow->activeNotes.removeAt(i);
+            continue;
+        }
     }
     
     // Check if una corda (soft pedal) is active
@@ -815,6 +845,9 @@ void MainWindow::playNote(const QString &note)
     activeNote.length = sampleCount;
     activeNote.sampleRate = sampleRate;
     activeNote.channels = channels;
+    activeNote.isSustained = false;
+    activeNote.sustainVolume = 1.0;
+    activeNote.framesPlayed = 0;  // Initialize frames played counter
     
     // Add to pending notes queue (very fast, rarely blocks)
     // The audio callback will move these to active notes
