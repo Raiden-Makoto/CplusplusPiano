@@ -207,6 +207,17 @@ void MainWindow::setupUI()
     );
     pedalLayout->addWidget(damperPedalIndicator);
     
+    // Add "Press ESC to quit" label
+    QLabel *quitLabel = new QLabel("Press ESC to quit", centralWidget);
+    quitLabel->setStyleSheet(
+        "QLabel {"
+        "  font-size: 14px;"
+        "  padding: 5px;"
+        "  color: #666666;"
+        "}"
+    );
+    pedalLayout->addWidget(quitLabel);
+    
     mainLayout->addLayout(pedalLayout);
     
     // Resize window to fit the piano keys with symmetric margins
@@ -1005,8 +1016,8 @@ void MainWindow::highlightKey(const QString &note)
                         ).arg(r).arg(g).arg(b);
                         button->setStyleSheet(fadeStyle);
                     } else {
-                        // Fade from yellow (#FFE66D) back to white
-                        int r1 = 0xFF, g1 = 0xE6, b1 = 0x6D;  // Yellow
+                        // Fade from light blue (149, 199, 255) back to white
+                        int r1 = 149, g1 = 199, b1 = 255;  // Light blue
                         int r2 = 0xFF, g2 = 0xFF, b2 = 0xFF;  // White
                         int r = static_cast<int>(r1 * progress + r2 * (1.0 - progress));
                         int g = static_cast<int>(g1 * progress + g2 * (1.0 - progress));
@@ -1034,6 +1045,13 @@ void MainWindow::highlightKey(const QString &note)
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
+    // Check for Escape key to quit
+    if (event->key() == Qt::Key_Escape) {
+        QCoreApplication::quit();
+        event->accept();
+        return;
+    }
+    
     // Check for pedal keys: N for una corda, M for damper pedal
     int key = event->key();
     if (key == Qt::Key_N) {
