@@ -52,6 +52,12 @@ void MainWindow::setupUI()
     QLabel *title = new QLabel("Virtual Piano - Press Keys or Click Buttons", centralWidget);
     title->setAlignment(Qt::AlignCenter);
     title->setMargin(10);  // Add padding inside the label
+    title->setStyleSheet(
+        "QLabel {"
+        "  font-size: 24px;"
+        "  font-weight: bold;"
+        "}"
+    );
     mainLayout->addWidget(title);
     
     // Define key dimensions
@@ -154,7 +160,7 @@ void MainWindow::setupUI()
         "C#5", "D#5", "F#5", "G#5", "A#5"   // Octave 5
     };
     const int blackKeyWidth = 38;  // Proportionally narrower
-    const int blackKeyHeight = 130;
+    const int blackKeyHeight = 170;  // Taller black keys
     const int blackKeyY = 0;  // Position at top of container
     
     // Black keys are positioned between specific white key pairs for three octaves:
