@@ -16,6 +16,7 @@
 #include <QMutex>
 #include <QVector>
 #include <QKeyEvent>
+#include <QTimer>
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 #include <cmath>
@@ -131,7 +132,7 @@ void MainWindow::setupUI()
         // Create the button first (background layer)
         QPushButton *key = new QPushButton(keyContainer);
         key->setFixedSize(whiteKeyWidth, whiteKeyHeight);
-        key->setStyleSheet(
+        QString whiteKeyStyle = QString(
             "QPushButton {"
             "  background-color: white;"
             "  border: 2px solid black;"
@@ -141,6 +142,8 @@ void MainWindow::setupUI()
             "  background-color: #e0e0e0;"
             "}"
         );
+        key->setStyleSheet(whiteKeyStyle);
+        keyOriginalStyles[keyId] = whiteKeyStyle;  // Store original style
         
         // Create label at bottom with keybind, positioned on top of button
         QLabel *noteLabel = new QLabel(keybind, keyContainer);
@@ -274,7 +277,7 @@ void MainWindow::setupUI()
         QPushButton *key = new QPushButton(keybind, pianoKeysContainer);
         key->setGeometry(blackKeyX, blackKeyY, blackKeyWidth, blackKeyHeight);
         key->raise();  // Ensure black keys are on top
-        key->setStyleSheet(
+        QString blackKeyStyle = QString(
             "QPushButton {"
             "  background-color: black;"
             "  color: white;"
@@ -287,6 +290,8 @@ void MainWindow::setupUI()
             "  background-color: #333333;"
             "}"
         );
+        key->setStyleSheet(blackKeyStyle);
+        keyOriginalStyles[keyId] = blackKeyStyle;  // Store original style
         pianoKeys[keyId] = key;
     }
     
@@ -883,6 +888,9 @@ void MainWindow::playNote(const QString &note)
     // This prevents blocking when many keys are pressed quickly
     QMutexLocker locker(&pendingNotesMutex);
     pendingNotes.append(activeNote);
+    
+    // Highlight the key visually
+    highlightKey(note);
 }
 
 void MainWindow::connectKeySignals()
@@ -899,6 +907,128 @@ void MainWindow::connectKeySignals()
         connect(button, &QPushButton::clicked, this, [this, note]() {
             playNote(note);
         });
+    }
+}
+
+void MainWindow::highlightKey(const QString &note)
+{
+    // Find all keys that match this note (could be multiple if same note appears in different octaves)
+    for (auto it = pianoKeys.begin(); it != pianoKeys.end(); ++it) {
+        QString keyId = it.key();
+        QPushButton *button = it.value();
+        
+        // Extract note name from keyId (format: "C4_7" -> "C4")
+        QString keyNote = keyId.split('_').first();
+        
+        if (keyNote == note) {
+            // Determine if this is a white or black key based on note name
+            bool isBlackKey = keyNote.contains('#');
+            
+            // Stop any existing fade timer for this key
+            if (keyFadeTimers.contains(keyId)) {
+                QTimer *existingTimer = keyFadeTimers[keyId];
+                if (existingTimer) {
+                    existingTimer->stop();
+                    existingTimer->deleteLater();
+                }
+                keyFadeTimers.remove(keyId);
+            }
+            
+            // Set highlighted color immediately
+            QString highlightStyle;
+            if (isBlackKey) {
+                // Black key: highlight with dark blue
+                highlightStyle = QString(
+                    "QPushButton {"
+                    "  background-color: #1E3A8A;"
+                    "  color: white;"
+                    "  border: 1px solid gray;"
+                    "  border-radius: 3px;"
+                    "  font-size: 12px;"
+                    "  font-weight: bold;"
+                    "}"
+                );
+            } else {
+                // White key: highlight with light yellow
+                highlightStyle = QString(
+                    "QPushButton {"
+                    "  background-color:rgb(149, 199, 255);"
+                    "  border: 2px solid black;"
+                    "  border-radius: 5px;"
+                    "}"
+                );
+            }
+            button->setStyleSheet(highlightStyle);
+            
+            // Create fade timer to restore original style with smooth fade
+            QTimer *fadeTimer = new QTimer(this);
+            fadeTimer->setInterval(20);  // Update every 20ms for smooth fade
+            keyFadeSteps[keyId] = 0;  // Start fade step counter
+            
+            connect(fadeTimer, &QTimer::timeout, this, [this, keyId, button, fadeTimer, isBlackKey]() {
+                int step = keyFadeSteps[keyId];
+                step++;
+                keyFadeSteps[keyId] = step;
+                
+                // Fade over 10 steps (200ms total)
+                const int totalSteps = 10;
+                if (step >= totalSteps) {
+                    // Fade complete - restore original style
+                    if (keyOriginalStyles.contains(keyId)) {
+                        button->setStyleSheet(keyOriginalStyles[keyId]);
+                    }
+                    // Clean up
+                    fadeTimer->stop();
+                    fadeTimer->deleteLater();
+                    keyFadeTimers.remove(keyId);
+                    keyFadeSteps.remove(keyId);
+                } else {
+                    // Interpolate between highlight and original color
+                    double progress = 1.0 - (static_cast<double>(step) / totalSteps);
+                    
+                    if (isBlackKey) {
+                        // Fade from dark blue (#1E3A8A) back to black
+                        int r1 = 0x1E, g1 = 0x3A, b1 = 0x8A;  // Dark blue
+                        int r2 = 0x00, g2 = 0x00, b2 = 0x00;  // Black
+                        int r = static_cast<int>(r1 * progress + r2 * (1.0 - progress));
+                        int g = static_cast<int>(g1 * progress + g2 * (1.0 - progress));
+                        int b = static_cast<int>(b1 * progress + b2 * (1.0 - progress));
+                        QString fadeStyle = QString(
+                            "QPushButton {"
+                            "  background-color: rgb(%1, %2, %3);"
+                            "  color: white;"
+                            "  border: 1px solid gray;"
+                            "  border-radius: 3px;"
+                            "  font-size: 12px;"
+                            "  font-weight: bold;"
+                            "}"
+                        ).arg(r).arg(g).arg(b);
+                        button->setStyleSheet(fadeStyle);
+                    } else {
+                        // Fade from yellow (#FFE66D) back to white
+                        int r1 = 0xFF, g1 = 0xE6, b1 = 0x6D;  // Yellow
+                        int r2 = 0xFF, g2 = 0xFF, b2 = 0xFF;  // White
+                        int r = static_cast<int>(r1 * progress + r2 * (1.0 - progress));
+                        int g = static_cast<int>(g1 * progress + g2 * (1.0 - progress));
+                        int b = static_cast<int>(b1 * progress + b2 * (1.0 - progress));
+                        QString fadeStyle = QString(
+                            "QPushButton {"
+                            "  background-color: rgb(%1, %2, %3);"
+                            "  border: 2px solid black;"
+                            "  border-radius: 5px;"
+                            "}"
+                        ).arg(r).arg(g).arg(b);
+                        button->setStyleSheet(fadeStyle);
+                    }
+                }
+            });
+            
+            keyFadeTimers[keyId] = fadeTimer;
+            fadeTimer->start();
+            
+            // Only highlight the first matching key (in case of duplicates)
+            break;
+        }
     }
 }
 

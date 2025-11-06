@@ -35,6 +35,7 @@ private:
     void setupUI();
     void setupAudio();
     void connectKeySignals();
+    void highlightKey(const QString &note);
     QString getAudioFilePath(const QString &note);
     QByteArray loadWavPcmData(const QString &filePath, int &sampleRate, int &channels);
     static OSStatus audioRenderCallback(void *inRefCon,
@@ -54,6 +55,9 @@ private:
     QCheckBox *damperPedalIndicator;
     
     QMap<QString, QPushButton*> pianoKeys;
+    QMap<QString, QString> keyOriginalStyles;  // Store original styles for fade-back
+    QMap<QString, QTimer*> keyFadeTimers;  // Timers for fade-back animation
+    QMap<QString, int> keyFadeSteps;  // Track fade animation steps
     QMap<QString, QByteArray> audioBuffers;  // Pre-loaded PCM audio data
     QMap<QString, int> audioSampleRates;  // Sample rate for each note
     QMap<QString, int> audioChannels;  // Channel count for each note
