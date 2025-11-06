@@ -12,6 +12,7 @@
 #include <QStandardPaths>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QEventLoop>
 #include <QSet>
 #include <QDebug>
 
@@ -227,6 +228,9 @@ void MainWindow::setupAudio()
         uniqueNotes.insert(note);
     }
     
+    // Create a pool of 3 pre-loaded effects per note for instant playback and overlapping
+    const int effectsPerNote = 3;
+    
     for (const QString &note : uniqueNotes) {
         QString wavPath = getAudioFilePath(note);
         QFileInfo fileInfo(wavPath);
@@ -236,23 +240,28 @@ void MainWindow::setupAudio()
             continue;
         }
         
-        // Load WAV file directly for low latency playback with QSoundEffect
-        QSoundEffect *effect = new QSoundEffect(this);
-        effect->setSource(QUrl::fromLocalFile(wavPath));
-        effect->setVolume(0.5f);
-        effect->setLoopCount(1);
+        QList<QSoundEffect*> effectPool;
         
-        // Pre-warm the effect by loading it (this ensures it's ready for instant playback)
-        // We don't actually play it, just ensure it's loaded
-        effect->setMuted(true);  // Mute during pre-warm
-        effect->play();  // Start loading
-        effect->stop();  // Stop immediately
-        effect->setMuted(false);  // Unmute for actual playback
+        // Create multiple pre-loaded effects for this note
+        for (int i = 0; i < effectsPerNote; ++i) {
+            QSoundEffect *effect = new QSoundEffect(this);
+            effect->setSource(QUrl::fromLocalFile(wavPath));
+            effect->setVolume(0.5f);
+            effect->setLoopCount(1);
+            
+            // Wait for the effect to be ready (status becomes Ready)
+            // This ensures the audio is fully loaded before first use
+            while (effect->status() != QSoundEffect::Ready) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            }
+            
+            effectPool.append(effect);
+        }
         
-        soundEffects[note] = effect;
+        soundEffectPools[note] = effectPool;
     }
     
-    qDebug() << "Preloaded and pre-warmed" << soundEffects.size() << "audio files with QSoundEffect";
+    qDebug() << "Preloaded and pre-warmed" << soundEffectPools.size() << "notes with" << effectsPerNote << "effects each";
 }
 
 QString MainWindow::getAudioFilePath(const QString &note)
@@ -311,32 +320,31 @@ QString MainWindow::getAudioFilePath(const QString &note)
 
 void MainWindow::playNote(const QString &note)
 {
-    if (!soundEffects.contains(note)) {
-        qWarning() << "No sound effect found for note:" << note;
+    if (!soundEffectPools.contains(note)) {
+        qWarning() << "No sound effect pool found for note:" << note;
         return;
     }
     
-    // QSoundEffect is designed for low-latency playback
-    // It can play overlapping sounds by creating multiple instances
-    QSoundEffect *effect = soundEffects[note];
+    QList<QSoundEffect*> &effectPool = soundEffectPools[note];
     
-    // For overlapping notes, create a new instance
-    if (effect->isPlaying()) {
-        QSoundEffect *newEffect = new QSoundEffect(this);
-        newEffect->setSource(effect->source());
-        newEffect->setVolume(0.5f);
-        newEffect->setLoopCount(1);
-        newEffect->play();
-        
-        // Clean up when finished
-        connect(newEffect, &QSoundEffect::playingChanged, this, [newEffect]() {
-            if (!newEffect->isPlaying()) {
-                newEffect->deleteLater();
-            }
-        });
-    } else {
-        // Play immediately with the pre-loaded effect
-        effect->play();
+    // Find an available (not playing) effect for instant playback
+    QSoundEffect *availableEffect = nullptr;
+    for (QSoundEffect *effect : effectPool) {
+        if (!effect->isPlaying()) {
+            availableEffect = effect;
+            break;
+        }
+    }
+    
+    // If all effects are busy, use the first one (will interrupt)
+    if (!availableEffect && !effectPool.isEmpty()) {
+        availableEffect = effectPool.first();
+        availableEffect->stop();
+    }
+    
+    if (availableEffect) {
+        // Play immediately - effect is pre-warmed and ready
+        availableEffect->play();
     }
 }
 
