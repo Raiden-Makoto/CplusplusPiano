@@ -1,6 +1,6 @@
 QT += core widgets multimedia
 
-CONFIG += c++17
+CONFIG += c++17 sdk_no_version_check
 
 TARGET = CplusplusPiano
 TEMPLATE = app
