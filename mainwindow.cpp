@@ -31,7 +31,7 @@ void MainWindow::setupUI()
     
     // Define key dimensions
     const int whiteKeyWidth = 60;  // Narrower keys
-    const int whiteKeyHeight = 200;
+    const int whiteKeyHeight = 250;  // Taller keys
     const int totalWhiteKeys = 22;  // Three octaves plus final C (3 × 7 + 1 = 22)
     
     // Create a container widget for piano keys (allows absolute positioning of black keys)
@@ -42,18 +42,22 @@ void MainWindow::setupUI()
     whiteKeysLayout->setContentsMargins(0, 0, 0, 0);
     whiteKeysLayout->setSpacing(0);
     
-    // Create white keys for three octaves plus final C
+    // Create white keys for three octaves plus final C with octave numbers
+    // Octaves: C3-C4 (first), C4-C5 (second), C5-C6 (third), final C6
     QStringList whiteNotes = {
-        "C", "D", "E", "F", "G", "A", "B",  // Octave 1
-        "C", "D", "E", "F", "G", "A", "B",  // Octave 2
-        "C", "D", "E", "F", "G", "A", "B",  // Octave 3
-        "C"                                  // Final C
+        "C3", "D3", "E3", "F3", "G3", "A3", "B3",  // Octave 3
+        "C4", "D4", "E4", "F4", "G4", "A4", "B4",  // Octave 4 (middle C is C4)
+        "C5", "D5", "E5", "F5", "G5", "A5", "B5",  // Octave 5
+        "C6"                                        // Final C6
     };
     
     for (int i = 0; i < whiteNotes.size(); i++) {
         const QString &note = whiteNotes[i];
         // Create unique key identifier (note + index to handle duplicates)
         QString keyId = QString("%1_%2").arg(note).arg(i);
+        // Check if this is middle C (C4) - index 7
+        bool isMiddleC = (i == 7);
+        
         // Create a container widget for the key with label at bottom
         QWidget *keyContainer = new QWidget(pianoKeysContainer);
         keyContainer->setFixedSize(whiteKeyWidth, whiteKeyHeight);
@@ -75,14 +79,28 @@ void MainWindow::setupUI()
         // Create label at bottom, positioned on top of button
         QLabel *noteLabel = new QLabel(note, keyContainer);
         noteLabel->setAlignment(Qt::AlignCenter);
-        noteLabel->setStyleSheet(
-            "QLabel {"
-            "  background-color: transparent;"
-            "  color: black;"
-            "  font-size: 16px;"
-            "  font-weight: bold;"
-            "}"
-        );
+        // Make C4 (middle C) bold and red, others normal weight and black
+        QString labelStyle;
+        if (isMiddleC) {
+            labelStyle = QString(
+                "QLabel {"
+                "  background-color: transparent;"
+                "  color: red;"
+                "  font-size: 16px;"
+                "  font-weight: bold;"
+                "}"
+            );
+        } else {
+            labelStyle = QString(
+                "QLabel {"
+                "  background-color: transparent;"
+                "  color: black;"
+                "  font-size: 16px;"
+                "  font-weight: normal;"
+                "}"
+            );
+        }
+        noteLabel->setStyleSheet(labelStyle);
         // Position label at bottom of container
         noteLabel->setGeometry(0, whiteKeyHeight - 30, whiteKeyWidth, 30);
         noteLabel->raise();  // Put label on top so it's visible
@@ -97,7 +115,7 @@ void MainWindow::setupUI()
     // Add small symmetric padding to account for window frame
     int padding = 10;  // Symmetric padding on both sides
     int windowWidth = containerWidth + (padding * 2);
-    int windowHeight = whiteKeyHeight + 60;  // Add space for title
+    int windowHeight = whiteKeyHeight + 80;  // Taller window, add space for title
     resize(windowWidth, windowHeight);
     
     // Center the piano container horizontally with symmetric margins
