@@ -1339,7 +1339,9 @@ build/obj/mainwindow.o: mainwindow.cpp mainwindow.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QStringList \
 		/opt/homebrew/lib/QtCore.framework/Headers/qstringlist.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QList \
-		/opt/homebrew/lib/QtCore.framework/Headers/qlist.h
+		/opt/homebrew/lib/QtCore.framework/Headers/qlist.h \
+		/opt/homebrew/lib/QtWidgets.framework/Headers/QSpacerItem \
+		/opt/homebrew/lib/QtWidgets.framework/Headers/qlayoutitem.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/mainwindow.o mainwindow.cpp
 
 build/obj/moc_mainwindow.o: build/moc/moc_mainwindow.cpp 
