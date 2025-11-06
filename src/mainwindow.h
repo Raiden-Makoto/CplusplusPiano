@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QMutex>
 #include <QVector>
+#include <QKeyEvent>
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 
@@ -20,6 +21,10 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
 
 private slots:
     void playNote(const QString &note);
@@ -54,7 +59,6 @@ private:
     
     // Active notes (for mixing)
     struct ActiveNote {
-        QString note;
         const qint16 *data;
         int position;
         int length;
@@ -63,6 +67,14 @@ private:
     };
     QVector<ActiveNote> activeNotes;
     QMutex activeNotesMutex;
+    
+    // Pending notes queue (for rapid key presses)
+    // New notes are added here first, then moved to activeNotes in the audio callback
+    QVector<ActiveNote> pendingNotes;
+    QMutex pendingNotesMutex;
+    
+    // Pre-allocated buffer for mixing to avoid allocations in callback
+    QVector<qint32> mixBuffer;
 };
 
 #endif // MAINWINDOW_H

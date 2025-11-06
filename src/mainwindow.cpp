@@ -15,6 +15,7 @@
 #include <QSet>
 #include <QMutex>
 #include <QVector>
+#include <QKeyEvent>
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 #include <cmath>
@@ -27,6 +28,9 @@ MainWindow::MainWindow(QWidget *parent)
     setupAudio();  // Preload audio files after keys are created
     connectKeySignals();
     setWindowTitle("Virtual Piano");
+    
+    // Enable keyboard focus so keyPressEvent works
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 MainWindow::~MainWindow()
@@ -73,7 +77,7 @@ void MainWindow::setupUI()
     whiteKeysLayout->setContentsMargins(0, 0, 0, 0);
     whiteKeysLayout->setSpacing(0);
     
-    // Create white keys for three octaves plus final C with octave numbers
+    // Create white keys for three octaves plus final C with keybind labels
     // Octaves: C3-C4 (first), C4-C5 (second), C5-C6 (third), final C6
     QStringList whiteNotes = {
         "C3", "D3", "E3", "F3", "G3", "A3", "B3",  // Octave 3
@@ -82,12 +86,35 @@ void MainWindow::setupUI()
         "C6"                                        // Final C6
     };
     
+    // Map note to keybind for display
+    QMap<QString, QString> noteToKeybind;
+    // First octave (C3-B3): number row
+    noteToKeybind["C3"] = "1"; noteToKeybind["C#3"] = "2"; noteToKeybind["D3"] = "3";
+    noteToKeybind["D#3"] = "4"; noteToKeybind["E3"] = "5"; noteToKeybind["F3"] = "6";
+    noteToKeybind["F#3"] = "7"; noteToKeybind["G3"] = "8"; noteToKeybind["G#3"] = "9";
+    noteToKeybind["A3"] = "0"; noteToKeybind["A#3"] = "-"; noteToKeybind["B3"] = "=";
+    // Second octave (C4-B4): qwert row
+    noteToKeybind["C4"] = "q"; noteToKeybind["C#4"] = "w"; noteToKeybind["D4"] = "e";
+    noteToKeybind["D#4"] = "r"; noteToKeybind["E4"] = "t"; noteToKeybind["F4"] = "y";
+    noteToKeybind["F#4"] = "u"; noteToKeybind["G4"] = "i"; noteToKeybind["G#4"] = "o";
+    noteToKeybind["A4"] = "p"; noteToKeybind["A#4"] = "["; noteToKeybind["B4"] = "]";
+    // Third octave (C5-B5): asdfg row
+    noteToKeybind["C5"] = "a"; noteToKeybind["C#5"] = "s"; noteToKeybind["D5"] = "d";
+    noteToKeybind["D#5"] = "f"; noteToKeybind["E5"] = "g"; noteToKeybind["F5"] = "h";
+    noteToKeybind["F#5"] = "j"; noteToKeybind["G5"] = "k"; noteToKeybind["G#5"] = "l";
+    noteToKeybind["A5"] = ";"; noteToKeybind["A#5"] = "'"; noteToKeybind["B5"] = "\\";
+    // C6 uses z key
+    noteToKeybind["C6"] = "z";
+    
     for (int i = 0; i < whiteNotes.size(); i++) {
         const QString &note = whiteNotes[i];
         // Create unique key identifier (note + index to handle duplicates)
         QString keyId = QString("%1_%2").arg(note).arg(i);
         // Check if this is middle C (C4) - index 7
         bool isMiddleC = (i == 7);
+        
+        // Get keybind for this note (if no keybind, show empty string)
+        QString keybind = noteToKeybind.value(note, "");
         
         // Create a container widget for the key with label at bottom
         QWidget *keyContainer = new QWidget(pianoKeysContainer);
@@ -107,10 +134,10 @@ void MainWindow::setupUI()
             "}"
         );
         
-        // Create label at bottom, positioned on top of button
-        QLabel *noteLabel = new QLabel(note, keyContainer);
+        // Create label at bottom with keybind, positioned on top of button
+        QLabel *noteLabel = new QLabel(keybind, keyContainer);
         noteLabel->setAlignment(Qt::AlignCenter);
-        // Make C4 (middle C) bold and red, others normal weight and black
+        // Make C4 (middle C, keybind "q") bold and red, others normal weight and black
         QString labelStyle;
         if (isMiddleC) {
             labelStyle = QString(
@@ -204,7 +231,10 @@ void MainWindow::setupUI()
         // Create unique key identifier for black keys
         QString keyId = QString("%1_%2").arg(blackNotes[i]).arg(i);
         
-        QPushButton *key = new QPushButton(blackNotes[i], pianoKeysContainer);
+        // Get keybind for this black key note
+        QString keybind = noteToKeybind.value(blackNotes[i], blackNotes[i]);
+        
+        QPushButton *key = new QPushButton(keybind, pianoKeysContainer);
         key->setGeometry(blackKeyX, blackKeyY, blackKeyWidth, blackKeyHeight);
         key->raise();  // Ensure black keys are on top
         key->setStyleSheet(
@@ -374,8 +404,13 @@ void MainWindow::setupAudio()
     // The actual sample rate will be determined when setting up the audio unit
     outputChannels = commonChannels;
     
+    // Pre-allocate mix buffer for maximum callback size (typically 512 frames max)
+    // This avoids allocations in the audio callback which can cause lag
+    mixBuffer.resize(512 * outputChannels);
+    
     qDebug() << "Preloaded" << audioBuffers.size() << "audio files into memory";
     qDebug() << "Audio format: SampleRate:" << outputSampleRate << "Channels:" << outputChannels;
+    qDebug() << "All samples are pre-loaded and ready for direct playback";
     
     // Setup Core Audio with minimum latency
     AudioComponentDescription desc;
@@ -464,27 +499,21 @@ void MainWindow::setupAudio()
     // Get actual latency information
     Float64 latencySeconds = 0;
     UInt32 latencySize = sizeof(latencySeconds);
-    err = AudioUnitGetProperty(audioUnit,
-                               kAudioUnitProperty_Latency,
-                               kAudioUnitScope_Global,
-                               0,
-                               &latencySeconds,
-                               &latencySize);
-    
-    // Calculate buffer time at current sample rate
-    // Typical buffer sizes: 32-128 frames
-    // At 96kHz: 64 frames = 0.67ms, 32 frames = 0.33ms
-    // At 48kHz: 64 frames = 1.33ms, 32 frames = 0.67ms
-    // At 44.1kHz: 64 frames = 1.45ms, 32 frames = 0.73ms
+    AudioUnitGetProperty(audioUnit,
+                        kAudioUnitProperty_Latency,
+                        kAudioUnitScope_Global,
+                        0,
+                        &latencySeconds,
+                        &latencySize);
     
     qDebug() << "Core Audio started with minimum latency";
     qDebug() << "  Sample rate:" << outputSampleRate << "Hz";
     qDebug() << "  Channels:" << outputChannels;
-    if (err == noErr) {
+    if (latencySeconds > 0) {
         qDebug() << "  AudioUnit latency:" << (latencySeconds * 1000.0) << "ms";
     }
-    qDebug() << "  Estimated buffer time (64 frames):" << (64.0 * 1000.0 / outputSampleRate) << "ms";
-    qDebug() << "  Estimated buffer time (32 frames):" << (32.0 * 1000.0 / outputSampleRate) << "ms";
+    qDebug() << "  Direct sample playback - no effects or processing";
+    qDebug() << "  All samples pre-loaded in memory for instant playback";
 }
 
 QString MainWindow::getAudioFilePath(const QString &note)
@@ -561,17 +590,40 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
     int samplesPerFrame = mainWindow->outputChannels;
     UInt32 totalSamples = framesPerBuffer * samplesPerFrame;
     
-    // Clear output buffer
-    for (UInt32 i = 0; i < totalSamples; ++i) {
-        out[i] = 0;
+    // Ensure mix buffer is large enough (pre-allocated to avoid allocations)
+    if (mainWindow->mixBuffer.size() < static_cast<int>(totalSamples)) {
+        mainWindow->mixBuffer.resize(totalSamples);
     }
     
-    // Lock the active notes list - work directly on it to minimize overhead
+    // Clear mix buffer (use 32-bit for accumulation to avoid clipping)
+    qint32 *mix = mainWindow->mixBuffer.data();
+    for (UInt32 i = 0; i < totalSamples; ++i) {
+        mix[i] = 0;
+    }
+    
+    // First, quickly add any pending notes to active notes (very fast operation)
+    {
+        QMutexLocker pendingLock(&mainWindow->pendingNotesMutex);
+        if (!mainWindow->pendingNotes.isEmpty()) {
+            QMutexLocker activeLock(&mainWindow->activeNotesMutex);
+            mainWindow->activeNotes.append(mainWindow->pendingNotes);
+            mainWindow->pendingNotes.clear();
+        }
+    }
+    
+    // Lock and mix all active notes (minimize lock time by working directly)
+    // We need to lock because we're modifying positions
     QMutexLocker locker(&mainWindow->activeNotesMutex);
     
     // Mix all active notes
     for (int i = mainWindow->activeNotes.size() - 1; i >= 0; --i) {
         ActiveNote &activeNote = mainWindow->activeNotes[i];
+        
+        // Skip if note is finished
+        if (activeNote.position >= activeNote.length) {
+            mainWindow->activeNotes.removeAt(i);
+            continue;
+        }
         
         // Calculate how many samples we need from this note
         int noteSamplesPerFrame = activeNote.channels;
@@ -579,21 +631,26 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
         int noteSamplesAvailable = activeNote.length - activeNote.position;
         UInt32 samplesToMix = qMin(static_cast<UInt32>(noteSamplesAvailable), noteSamplesNeeded);
         
-        // Handle sample rate conversion if needed (simple linear interpolation)
+        // Fast path: same sample rate and channels - direct mixing (no processing, no effects)
         if (activeNote.sampleRate == mainWindow->outputSampleRate && 
             activeNote.channels == mainWindow->outputChannels) {
-            // Same sample rate and channels - direct mixing (interleaved)
-            for (UInt32 j = 0; j < samplesToMix; ++j) {
-                int noteIndex = activeNote.position + static_cast<int>(j);
-                if (j < totalSamples && noteIndex < activeNote.length) {
-                    // Mix with clipping protection
-                    qint32 mixed = static_cast<qint32>(out[j]) + static_cast<qint32>(activeNote.data[noteIndex]);
-                    out[j] = static_cast<SInt16>(qBound(-32768, mixed, 32767));
-                }
+            // Direct sample playback - just mix samples directly, no processing
+            const qint16 *noteData = activeNote.data + activeNote.position;
+            // Unroll loop for better performance (process 4 samples at a time when possible)
+            UInt32 j = 0;
+            for (; j + 3 < samplesToMix && j + 3 < totalSamples; j += 4) {
+                mix[j] += static_cast<qint32>(noteData[j]);
+                mix[j+1] += static_cast<qint32>(noteData[j+1]);
+                mix[j+2] += static_cast<qint32>(noteData[j+2]);
+                mix[j+3] += static_cast<qint32>(noteData[j+3]);
+            }
+            // Handle remaining samples
+            for (; j < samplesToMix && j < totalSamples; ++j) {
+                mix[j] += static_cast<qint32>(noteData[j]);
             }
             activeNote.position += static_cast<int>(samplesToMix);
         } else {
-            // Sample rate conversion needed (simplified - for production use proper resampling)
+            // Sample rate conversion needed (simplified)
             double ratio = static_cast<double>(activeNote.sampleRate) / mainWindow->outputSampleRate;
             for (UInt32 frame = 0; frame < framesPerBuffer; ++frame) {
                 double noteFrame = activeNote.position / static_cast<double>(noteSamplesPerFrame) + frame * ratio;
@@ -604,8 +661,7 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
                         UInt32 outIndex = frame * samplesPerFrame + ch;
                         int noteIndex = noteSampleIndex + ch;
                         if (outIndex < totalSamples && noteIndex < activeNote.length) {
-                            qint32 mixed = static_cast<qint32>(out[outIndex]) + static_cast<qint32>(activeNote.data[noteIndex]);
-                            out[outIndex] = static_cast<SInt16>(qBound(-32768, mixed, 32767));
+                            mix[outIndex] += static_cast<qint32>(activeNote.data[noteIndex]);
                         }
                     }
                 }
@@ -617,6 +673,11 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
         if (activeNote.position >= activeNote.length) {
             mainWindow->activeNotes.removeAt(i);
         }
+    }
+    
+    // Convert mix buffer to output with clipping protection
+    for (UInt32 i = 0; i < totalSamples; ++i) {
+        out[i] = static_cast<SInt16>(qBound(-32768, mix[i], 32767));
     }
     
     return noErr;
@@ -643,23 +704,17 @@ void MainWindow::playNote(const QString &note)
     
     // Create active note on stack (fast, no allocation)
     ActiveNote activeNote;
-    activeNote.note = note;
     activeNote.data = pcmData;
     activeNote.position = 0;
     activeNote.length = sampleCount;
     activeNote.sampleRate = sampleRate;
     activeNote.channels = channels;
     
-    // Add to active notes list (minimal lock time)
-    // Use tryLock first to avoid blocking if audio callback is running
-    if (activeNotesMutex.tryLock()) {
-        activeNotes.append(activeNote);
-        activeNotesMutex.unlock();
-    } else {
-        // If lock is busy (rare), wait briefly
-        QMutexLocker locker(&activeNotesMutex);
-        activeNotes.append(activeNote);
-    }
+    // Add to pending notes queue (very fast, rarely blocks)
+    // The audio callback will move these to active notes
+    // This prevents blocking when many keys are pressed quickly
+    QMutexLocker locker(&pendingNotesMutex);
+    pendingNotes.append(activeNote);
 }
 
 void MainWindow::connectKeySignals()
@@ -677,4 +732,77 @@ void MainWindow::connectKeySignals()
             playNote(note);
         });
     }
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    // Map keyboard keys to piano notes
+    // Each keyboard row = one octave, keys in order: C, C#, D, D#, E, F, F#, G, G#, A, A#, B
+    // First octave (C3-B3): number row - 1=C, 2=C#, 3=D, 4=D#, 5=E, 6=F, 7=F#, 8=G, 9=G#, 0=A, -=A#, ==B
+    // Second octave (C4-B4): qwert row - q=C, w=C#, e=D, r=D#, t=E, y=F, u=F#, i=G, o=G#, p=A, [=A#, ]=B
+    // Third octave (C5-B5): asdfg row - a=C, s=C#, d=D, f=D#, g=E, h=F, j=F#, k=G, l=G#, ;=A, '=A#, \=B
+    
+    QString note;
+    int key = event->key();
+    
+    // First octave (C3-B3) - number row in order
+    if (key == Qt::Key_1) note = "C3";
+    else if (key == Qt::Key_2) note = "C#3";
+    else if (key == Qt::Key_3) note = "D3";
+    else if (key == Qt::Key_4) note = "D#3";
+    else if (key == Qt::Key_5) note = "E3";
+    else if (key == Qt::Key_6) note = "F3";
+    else if (key == Qt::Key_7) note = "F#3";
+    else if (key == Qt::Key_8) note = "G3";
+    else if (key == Qt::Key_9) note = "G#3";
+    else if (key == Qt::Key_0) note = "A3";
+    else if (key == Qt::Key_Minus) note = "A#3";
+    else if (key == Qt::Key_Equal) note = "B3";
+    
+    // Second octave (C4-B4) - qwert row in order
+    else if (key == Qt::Key_Q) note = "C4";
+    else if (key == Qt::Key_W) note = "C#4";
+    else if (key == Qt::Key_E) note = "D4";
+    else if (key == Qt::Key_R) note = "D#4";
+    else if (key == Qt::Key_T) note = "E4";
+    else if (key == Qt::Key_Y) note = "F4";
+    else if (key == Qt::Key_U) note = "F#4";
+    else if (key == Qt::Key_I) note = "G4";
+    else if (key == Qt::Key_O) note = "G#4";
+    else if (key == Qt::Key_P) note = "A4";
+    else if (key == Qt::Key_BracketLeft) note = "A#4";
+    else if (key == Qt::Key_BracketRight) note = "B4";
+    
+    // Third octave (C5-B5) - asdfg row in order
+    else if (key == Qt::Key_A) note = "C5";
+    else if (key == Qt::Key_S) note = "C#5";
+    else if (key == Qt::Key_D) note = "D5";
+    else if (key == Qt::Key_F) note = "D#5";
+    else if (key == Qt::Key_G) note = "E5";
+    else if (key == Qt::Key_H) note = "F5";
+    else if (key == Qt::Key_J) note = "F#5";
+    else if (key == Qt::Key_K) note = "G5";
+    else if (key == Qt::Key_L) note = "G#5";
+    else if (key == Qt::Key_Semicolon) note = "A5";
+    else if (key == Qt::Key_Apostrophe || key == Qt::Key_QuoteDbl) note = "A#5";
+    else if (key == Qt::Key_Backslash) note = "B5";
+    
+    // C6 uses z key
+    else if (key == Qt::Key_Z) note = "C6";
+    
+    if (!note.isEmpty()) {
+        playNote(note);
+        event->accept();
+        return;
+    }
+    
+    // Let parent handle other keys
+    QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::keyReleaseEvent(QKeyEvent *event)
+{
+    // For now, we don't need to handle key release
+    // Notes play to completion when pressed
+    QMainWindow::keyReleaseEvent(event);
 }

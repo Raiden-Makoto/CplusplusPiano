@@ -1,0 +1,14 @@
+CompileFlags:
+  Add:
+    - -I/opt/homebrew/lib/QtCore.framework/Headers
+    - -I/opt/homebrew/lib/QtGui.framework/Headers
+    - -I/opt/homebrew/lib/QtWidgets.framework/Headers
+    - -I/opt/homebrew/lib/QtMultimedia.framework/Headers
+    - -I/opt/homebrew/include
+    - -F/opt/homebrew/lib
+    - -DQT_CORE_LIB
+    - -DQT_GUI_LIB
+    - -DQT_WIDGETS_LIB
+    - -DQT_MULTIMEDIA_LIB
+    - -std=c++17
+
