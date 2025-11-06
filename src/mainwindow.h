@@ -64,6 +64,8 @@ private:
         int length;
         int sampleRate;
         int channels;
+        bool isSustained;  // True if note is being sustained by damper pedal
+        double sustainVolume;  // Current volume multiplier for sustained notes (for fade-out)
     };
     QVector<ActiveNote> activeNotes;
     QMutex activeNotesMutex;
@@ -75,6 +77,17 @@ private:
     
     // Pre-allocated buffer for mixing to avoid allocations in callback
     QVector<qint32> mixBuffer;
+    
+    // Una corda (soft pedal) state
+    bool unaCordaActive;
+    QMutex unaCordaMutex;
+    
+    // Damper pedal (sustain) state
+    bool damperPedalActive;
+    QMutex damperPedalMutex;
+    
+    // Low-pass filter state for muffled tone (per channel)
+    QVector<double> lowPassFilterState;
 };
 
 #endif // MAINWINDOW_H

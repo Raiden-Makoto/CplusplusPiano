@@ -22,7 +22,8 @@
 #include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), audioUnit(nullptr), outputSampleRate(44100), outputChannels(2)
+    : QMainWindow(parent), audioUnit(nullptr), outputSampleRate(44100), outputChannels(2),
+      unaCordaActive(false), damperPedalActive(false)
 {
     setupUI();  // Must be called first to create pianoKeys
     setupAudio();  // Preload audio files after keys are created
@@ -31,6 +32,12 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Enable keyboard focus so keyPressEvent works
     setFocusPolicy(Qt::StrongFocus);
+    
+    // Initialize low-pass filter state (one per channel)
+    lowPassFilterState.resize(outputChannels);
+    for (int i = 0; i < outputChannels; ++i) {
+        lowPassFilterState[i] = 0.0;
+    }
 }
 
 MainWindow::~MainWindow()
@@ -615,14 +622,81 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
     // We need to lock because we're modifying positions
     QMutexLocker locker(&mainWindow->activeNotesMutex);
     
+    // Check damper pedal state
+    bool damperActive = false;
+    {
+        QMutexLocker damperLock(&mainWindow->damperPedalMutex);
+        damperActive = mainWindow->damperPedalActive;
+    }
+    
     // Mix all active notes
     for (int i = mainWindow->activeNotes.size() - 1; i >= 0; --i) {
         ActiveNote &activeNote = mainWindow->activeNotes[i];
         
-        // Skip if note is finished
+        // Check if note has reached the end of its sample data
         if (activeNote.position >= activeNote.length) {
-            mainWindow->activeNotes.removeAt(i);
-            continue;
+            // If damper pedal is active, sustain the note (fade out slowly)
+            if (damperActive && !activeNote.isSustained) {
+                activeNote.isSustained = true;
+                activeNote.sustainVolume = 1.0;  // Start at full volume
+            }
+            
+            // If note is sustained, apply fade-out
+            if (activeNote.isSustained) {
+                if (damperActive) {
+                    // While damper is held, sustain at current volume (very slow fade for more noticeable sustain)
+                    // Fade out over ~5 seconds (44100 * 5 samples) - much longer for more noticeable effect
+                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 5.0);
+                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - fadeRate);
+                } else {
+                    // Damper released - fade out over ~1 second (slower than before for more noticeable release)
+                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
+                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - fadeRate);
+                }
+                
+                // Remove note when volume reaches zero
+                if (activeNote.sustainVolume <= 0.0) {
+                    mainWindow->activeNotes.removeAt(i);
+                    continue;
+                }
+                
+                // For sustained notes, use the last sample value and apply volume
+                // Apply 1.1x volume multiplier to make sustain more noticeable
+                double sustainVolumeMultiplier = 1.1;
+                int lastSampleIndex = activeNote.length - activeNote.channels;
+                for (UInt32 frame = 0; frame < framesPerBuffer; ++frame) {
+                    // Calculate current volume for this frame (exponential decay)
+                    double frameVolume = activeNote.sustainVolume * sustainVolumeMultiplier;
+                    if (!damperActive) {
+                        // Faster decay when damper is released
+                        double decayRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
+                        frameVolume = qMax(0.0, (activeNote.sustainVolume - (decayRate * frame)) * sustainVolumeMultiplier);
+                    }
+                    
+                    for (int ch = 0; ch < activeNote.channels && ch < samplesPerFrame; ++ch) {
+                        if (lastSampleIndex + ch < activeNote.length) {
+                            qint16 lastSample = activeNote.data[lastSampleIndex + ch];
+                            UInt32 outIndex = frame * samplesPerFrame + ch;
+                            if (outIndex < totalSamples) {
+                                mix[outIndex] += static_cast<qint32>(lastSample * frameVolume);
+                            }
+                        }
+                    }
+                }
+                // Update sustain volume for next callback
+                if (damperActive) {
+                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 5.0);
+                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - (fadeRate * framesPerBuffer));
+                } else {
+                    double fadeRate = 1.0 / (mainWindow->outputSampleRate * 1.0);
+                    activeNote.sustainVolume = qMax(0.0, activeNote.sustainVolume - (fadeRate * framesPerBuffer));
+                }
+                continue;
+            } else {
+                // Note finished and not sustained - remove it
+                mainWindow->activeNotes.removeAt(i);
+                continue;
+            }
         }
         
         // Calculate how many samples we need from this note
@@ -669,15 +743,47 @@ OSStatus MainWindow::audioRenderCallback(void *inRefCon,
             activeNote.position += static_cast<int>(framesPerBuffer * ratio * noteSamplesPerFrame);
         }
         
-        // Remove note if it's finished
-        if (activeNote.position >= activeNote.length) {
-            mainWindow->activeNotes.removeAt(i);
-        }
+        // Note is still playing, continue to next note
+        // (Finished notes are handled above in the position >= length check)
     }
     
-    // Convert mix buffer to output with clipping protection
-    for (UInt32 i = 0; i < totalSamples; ++i) {
-        out[i] = static_cast<SInt16>(qBound(-32768, mix[i], 32767));
+    // Check if una corda (soft pedal) is active
+    bool unaCorda = false;
+    {
+        QMutexLocker lock(&mainWindow->unaCordaMutex);
+        unaCorda = mainWindow->unaCordaActive;
+    }
+    
+    // Apply una corda effect: volume reduction (15%) and low-pass filter for muffled tone
+    if (unaCorda) {
+        // Low-pass filter parameters (cutoff ~2500 Hz for muffled sound)
+        // alpha = dt / (dt + RC), where RC = 1 / (2 * pi * cutoff)
+        // For 44.1kHz sample rate and 2500 Hz cutoff:
+        double cutoffFreq = 2500.0;
+        double dt = 1.0 / mainWindow->outputSampleRate;
+        double rc = 1.0 / (2.0 * M_PI * cutoffFreq);
+        double alpha = dt / (dt + rc);
+        
+        // Apply low-pass filter and volume reduction (0.79 = 21% reduction)
+        double volumeMultiplier = 0.79;
+        
+        for (UInt32 i = 0; i < totalSamples; ++i) {
+            int channel = i % samplesPerFrame;
+            double filtered = alpha * mix[i] + (1.0 - alpha) * mainWindow->lowPassFilterState[channel];
+            mainWindow->lowPassFilterState[channel] = filtered;
+            qint32 finalValue = static_cast<qint32>(filtered * volumeMultiplier);
+            out[i] = static_cast<SInt16>(qBound(-32768, finalValue, 32767));
+        }
+    } else {
+        // Reset filter state when una corda is not active
+        for (int ch = 0; ch < samplesPerFrame; ++ch) {
+            mainWindow->lowPassFilterState[ch] = 0.0;
+        }
+        
+        // Convert mix buffer to output with clipping protection (normal volume)
+        for (UInt32 i = 0; i < totalSamples; ++i) {
+            out[i] = static_cast<SInt16>(qBound(-32768, mix[i], 32767));
+        }
     }
     
     return noErr;
@@ -736,6 +842,19 @@ void MainWindow::connectKeySignals()
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
+    // Check for Left Shift (una corda / soft pedal)
+    // On macOS, Left Shift native key code is 0x38, Right Shift is 0x3C
+    if (event->key() == Qt::Key_Shift) {
+        quint32 nativeKey = event->nativeVirtualKey();
+        if (nativeKey == 0x38) {  // Left Shift on macOS
+            QMutexLocker lock(&unaCordaMutex);
+            unaCordaActive = true;
+        } else if (nativeKey == 0x3C) {  // Right Shift on macOS (damper pedal)
+            QMutexLocker lock(&damperPedalMutex);
+            damperPedalActive = true;
+        }
+    }
+    
     // Map keyboard keys to piano notes
     // Each keyboard row = one octave, keys in order: C, C#, D, D#, E, F, F#, G, G#, A, A#, B
     // First octave (C3-B3): number row - 1=C, 2=C#, 3=D, 4=D#, 5=E, 6=F, 7=F#, 8=G, 9=G#, 0=A, -=A#, ==B
@@ -802,7 +921,17 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
 void MainWindow::keyReleaseEvent(QKeyEvent *event)
 {
-    // For now, we don't need to handle key release
-    // Notes play to completion when pressed
+    // Check for Shift release (una corda or damper pedal)
+    if (event->key() == Qt::Key_Shift) {
+        quint32 nativeKey = event->nativeVirtualKey();
+        if (nativeKey == 0x38) {  // Left Shift on macOS (una corda)
+            QMutexLocker lock(&unaCordaMutex);
+            unaCordaActive = false;
+        } else if (nativeKey == 0x3C) {  // Right Shift on macOS (damper pedal)
+            QMutexLocker lock(&damperPedalMutex);
+            damperPedalActive = false;
+        }
+    }
+    
     QMainWindow::keyReleaseEvent(event);
 }
