@@ -2,11 +2,9 @@ QT += core widgets
 
 CONFIG += c++17 sdk_no_version_check
 
-# PortAudio
+# Core Audio (macOS native)
 macx {
-    PORT_AUDIO_PATH = $$system(brew --prefix portaudio)
-    INCLUDEPATH += $$PORT_AUDIO_PATH/include
-    LIBS += -L$$PORT_AUDIO_PATH/lib -lportaudio
+    LIBS += -framework CoreAudio -framework AudioToolbox -framework AudioUnit
 }
 
 TARGET = CplusplusPiano

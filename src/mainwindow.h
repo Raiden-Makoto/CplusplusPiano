@@ -11,7 +11,8 @@
 #include <QFile>
 #include <QMutex>
 #include <QVector>
-#include <portaudio.h>
+#include <AudioToolbox/AudioToolbox.h>
+#include <CoreAudio/CoreAudio.h>
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -29,11 +30,12 @@ private:
     void connectKeySignals();
     QString getAudioFilePath(const QString &note);
     QByteArray loadWavPcmData(const QString &filePath, int &sampleRate, int &channels);
-    static int audioCallback(const void *inputBuffer, void *outputBuffer,
-                            unsigned long framesPerBuffer,
-                            const PaStreamCallbackTimeInfo *timeInfo,
-                            PaStreamCallbackFlags statusFlags,
-                            void *userData);
+    static OSStatus audioRenderCallback(void *inRefCon,
+                                       AudioUnitRenderActionFlags *ioActionFlags,
+                                       const AudioTimeStamp *inTimeStamp,
+                                       UInt32 inBusNumber,
+                                       UInt32 inNumberFrames,
+                                       AudioBufferList *ioData);
     
     QWidget *centralWidget;
     QWidget *pianoKeysContainer;  // Container for overlapping white and black keys
@@ -45,8 +47,8 @@ private:
     QMap<QString, int> audioSampleRates;  // Sample rate for each note
     QMap<QString, int> audioChannels;  // Channel count for each note
     
-    // PortAudio
-    PaStream *audioStream;
+    // Core Audio
+    AudioComponentInstance audioUnit;
     int outputSampleRate;
     int outputChannels;
     

@@ -15,12 +15,13 @@
 #include <QSet>
 #include <QMutex>
 #include <QVector>
-#include <portaudio.h>
+#include <AudioToolbox/AudioToolbox.h>
+#include <CoreAudio/CoreAudio.h>
 #include <cmath>
 #include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), audioStream(nullptr), outputSampleRate(44100), outputChannels(2)
+    : QMainWindow(parent), audioUnit(nullptr), outputSampleRate(44100), outputChannels(2)
 {
     setupUI();  // Must be called first to create pianoKeys
     setupAudio();  // Preload audio files after keys are created
@@ -30,12 +31,12 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Stop and close PortAudio stream
-    if (audioStream) {
-        Pa_StopStream(audioStream);
-        Pa_CloseStream(audioStream);
+    // Stop and cleanup Core Audio
+    if (audioUnit) {
+        AudioOutputUnitStop(audioUnit);
+        AudioUnitUninitialize(audioUnit);
+        AudioComponentInstanceDispose(audioUnit);
     }
-    Pa_Terminate();
 }
 
 void MainWindow::setupUI()
@@ -326,13 +327,6 @@ QByteArray MainWindow::loadWavPcmData(const QString &filePath, int &sampleRate, 
 
 void MainWindow::setupAudio()
 {
-    // Initialize PortAudio
-    PaError err = Pa_Initialize();
-    if (err != paNoError) {
-        qWarning() << "PortAudio initialization failed:" << Pa_GetErrorText(err);
-        return;
-    }
-    
     // Load all audio files and determine common format
     QSet<QString> uniqueNotes;
     for (auto it = pianoKeys.begin(); it != pianoKeys.end(); ++it) {
@@ -342,7 +336,6 @@ void MainWindow::setupAudio()
     }
     
     // Preload all audio files into memory as PCM data
-    int commonSampleRate = 44100;
     int commonChannels = 2;
     bool firstFile = true;
     
@@ -363,65 +356,129 @@ void MainWindow::setupAudio()
             audioSampleRates[note] = sampleRate;
             audioChannels[note] = channels;
             
-            // Use the first file's format as the common format
+            // Use the first file's channel count
             if (firstFile) {
-                commonSampleRate = sampleRate;
                 commonChannels = channels;
                 firstFile = false;
             }
         }
     }
     
-    outputSampleRate = commonSampleRate;
+    // We'll try to use a higher sample rate for lower latency
+    // The actual sample rate will be determined when setting up the audio unit
     outputChannels = commonChannels;
     
     qDebug() << "Preloaded" << audioBuffers.size() << "audio files into memory";
     qDebug() << "Audio format: SampleRate:" << outputSampleRate << "Channels:" << outputChannels;
     
-    // Open PortAudio stream with low latency settings
-    PaStreamParameters outputParameters;
-    outputParameters.device = Pa_GetDefaultOutputDevice();
-    if (outputParameters.device == paNoDevice) {
-        qWarning() << "No default output device found";
-        Pa_Terminate();
+    // Setup Core Audio with minimum latency
+    AudioComponentDescription desc;
+    desc.componentType = kAudioUnitType_Output;
+    desc.componentSubType = kAudioUnitSubType_DefaultOutput;
+    desc.componentManufacturer = kAudioUnitManufacturer_Apple;
+    desc.componentFlags = 0;
+    desc.componentFlagsMask = 0;
+    
+    AudioComponent component = AudioComponentFindNext(nullptr, &desc);
+    if (!component) {
+        qWarning() << "Failed to find audio component";
         return;
     }
     
-    outputParameters.channelCount = outputChannels;
-    outputParameters.sampleFormat = paInt16;
-    outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
-    outputParameters.hostApiSpecificStreamInfo = nullptr;
-    
-    // Use a small buffer size for low latency (64 frames = ~1.5ms at 44.1kHz)
-    unsigned long framesPerBuffer = 64;
-    
-    err = Pa_OpenStream(
-        &audioStream,
-        nullptr,  // No input
-        &outputParameters,
-        outputSampleRate,
-        framesPerBuffer,
-        paClipOff,  // Don't clip, we'll handle mixing
-        audioCallback,
-        this  // Pass this as userData
-    );
-    
-    if (err != paNoError) {
-        qWarning() << "PortAudio stream open failed:" << Pa_GetErrorText(err);
-        Pa_Terminate();
+    OSStatus err = AudioComponentInstanceNew(component, &audioUnit);
+    if (err != noErr) {
+        qWarning() << "Failed to create audio unit:" << err;
         return;
     }
     
-    // Start the stream
-    err = Pa_StartStream(audioStream);
-    if (err != paNoError) {
-        qWarning() << "PortAudio stream start failed:" << Pa_GetErrorText(err);
-        Pa_CloseStream(audioStream);
-        Pa_Terminate();
+    // Set up audio format - use 44.1kHz
+    outputSampleRate = 44100;
+    AudioStreamBasicDescription audioFormat;
+    audioFormat.mSampleRate = outputSampleRate;
+    audioFormat.mFormatID = kAudioFormatLinearPCM;
+    audioFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+    audioFormat.mBitsPerChannel = 16;
+    audioFormat.mChannelsPerFrame = outputChannels;
+    audioFormat.mBytesPerFrame = audioFormat.mChannelsPerFrame * sizeof(SInt16);
+    audioFormat.mFramesPerPacket = 1;
+    audioFormat.mBytesPerPacket = audioFormat.mBytesPerFrame * audioFormat.mFramesPerPacket;
+    audioFormat.mReserved = 0;
+    
+    // Set format on output scope
+    err = AudioUnitSetProperty(audioUnit,
+                               kAudioUnitProperty_StreamFormat,
+                               kAudioUnitScope_Input,
+                               0,
+                               &audioFormat,
+                               sizeof(audioFormat));
+    if (err != noErr) {
+        qWarning() << "Failed to set audio format:" << err;
+        AudioComponentInstanceDispose(audioUnit);
+        audioUnit = nullptr;
         return;
     }
     
-    qDebug() << "PortAudio stream started with latency:" << outputParameters.suggestedLatency * 1000 << "ms";
+    // Set render callback
+    AURenderCallbackStruct callbackStruct;
+    callbackStruct.inputProc = audioRenderCallback;
+    callbackStruct.inputProcRefCon = this;
+    
+    err = AudioUnitSetProperty(audioUnit,
+                               kAudioUnitProperty_SetRenderCallback,
+                               kAudioUnitScope_Input,
+                               0,
+                               &callbackStruct,
+                               sizeof(callbackStruct));
+    if (err != noErr) {
+        qWarning() << "Failed to set render callback:" << err;
+        AudioComponentInstanceDispose(audioUnit);
+        audioUnit = nullptr;
+        return;
+    }
+    
+    // Initialize audio unit
+    err = AudioUnitInitialize(audioUnit);
+    if (err != noErr) {
+        qWarning() << "Failed to initialize audio unit:" << err;
+        AudioComponentInstanceDispose(audioUnit);
+        audioUnit = nullptr;
+        return;
+    }
+    
+    // Start audio unit
+    err = AudioOutputUnitStart(audioUnit);
+    if (err != noErr) {
+        qWarning() << "Failed to start audio unit:" << err;
+        AudioUnitUninitialize(audioUnit);
+        AudioComponentInstanceDispose(audioUnit);
+        audioUnit = nullptr;
+        return;
+    }
+    
+    // Get actual latency information
+    Float64 latencySeconds = 0;
+    UInt32 latencySize = sizeof(latencySeconds);
+    err = AudioUnitGetProperty(audioUnit,
+                               kAudioUnitProperty_Latency,
+                               kAudioUnitScope_Global,
+                               0,
+                               &latencySeconds,
+                               &latencySize);
+    
+    // Calculate buffer time at current sample rate
+    // Typical buffer sizes: 32-128 frames
+    // At 96kHz: 64 frames = 0.67ms, 32 frames = 0.33ms
+    // At 48kHz: 64 frames = 1.33ms, 32 frames = 0.67ms
+    // At 44.1kHz: 64 frames = 1.45ms, 32 frames = 0.73ms
+    
+    qDebug() << "Core Audio started with minimum latency";
+    qDebug() << "  Sample rate:" << outputSampleRate << "Hz";
+    qDebug() << "  Channels:" << outputChannels;
+    if (err == noErr) {
+        qDebug() << "  AudioUnit latency:" << (latencySeconds * 1000.0) << "ms";
+    }
+    qDebug() << "  Estimated buffer time (64 frames):" << (64.0 * 1000.0 / outputSampleRate) << "ms";
+    qDebug() << "  Estimated buffer time (32 frames):" << (32.0 * 1000.0 / outputSampleRate) << "ms";
 }
 
 QString MainWindow::getAudioFilePath(const QString &note)
@@ -478,27 +535,32 @@ QString MainWindow::getAudioFilePath(const QString &note)
     return possiblePaths.first();
 }
 
-int MainWindow::audioCallback(const void *inputBuffer, void *outputBuffer,
-                              unsigned long framesPerBuffer,
-                              const PaStreamCallbackTimeInfo *timeInfo,
-                              PaStreamCallbackFlags statusFlags,
-                              void *userData)
+OSStatus MainWindow::audioRenderCallback(void *inRefCon,
+                                         AudioUnitRenderActionFlags *ioActionFlags,
+                                         const AudioTimeStamp *inTimeStamp,
+                                         UInt32 inBusNumber,
+                                         UInt32 inNumberFrames,
+                                         AudioBufferList *ioData)
 {
-    Q_UNUSED(inputBuffer);
-    Q_UNUSED(timeInfo);
-    Q_UNUSED(statusFlags);
+    Q_UNUSED(ioActionFlags);
+    Q_UNUSED(inTimeStamp);
+    Q_UNUSED(inBusNumber);
     
-    MainWindow *mainWindow = static_cast<MainWindow*>(userData);
-    qint16 *out = static_cast<qint16*>(outputBuffer);
+    MainWindow *mainWindow = static_cast<MainWindow*>(inRefCon);
+    
+    // Get output buffer
+    AudioBuffer *buffer = &ioData->mBuffers[0];
+    SInt16 *out = static_cast<SInt16*>(buffer->mData);
+    UInt32 framesPerBuffer = inNumberFrames;
+    int samplesPerFrame = mainWindow->outputChannels;
+    UInt32 totalSamples = framesPerBuffer * samplesPerFrame;
     
     // Clear output buffer
-    int samplesPerFrame = mainWindow->outputChannels;
-    unsigned long totalSamples = framesPerBuffer * samplesPerFrame;
-    for (unsigned long i = 0; i < totalSamples; ++i) {
+    for (UInt32 i = 0; i < totalSamples; ++i) {
         out[i] = 0;
     }
     
-    // Lock the active notes list
+    // Lock the active notes list - work directly on it to minimize overhead
     QMutexLocker locker(&mainWindow->activeNotesMutex);
     
     // Mix all active notes
@@ -507,37 +569,37 @@ int MainWindow::audioCallback(const void *inputBuffer, void *outputBuffer,
         
         // Calculate how many samples we need from this note
         int noteSamplesPerFrame = activeNote.channels;
-        unsigned long noteSamplesNeeded = framesPerBuffer * noteSamplesPerFrame;
+        UInt32 noteSamplesNeeded = framesPerBuffer * noteSamplesPerFrame;
         int noteSamplesAvailable = activeNote.length - activeNote.position;
-        unsigned long samplesToMix = qMin(static_cast<unsigned long>(noteSamplesAvailable), noteSamplesNeeded);
+        UInt32 samplesToMix = qMin(static_cast<UInt32>(noteSamplesAvailable), noteSamplesNeeded);
         
         // Handle sample rate conversion if needed (simple linear interpolation)
         if (activeNote.sampleRate == mainWindow->outputSampleRate && 
             activeNote.channels == mainWindow->outputChannels) {
             // Same sample rate and channels - direct mixing (interleaved)
-            for (unsigned long j = 0; j < samplesToMix; ++j) {
+            for (UInt32 j = 0; j < samplesToMix; ++j) {
                 int noteIndex = activeNote.position + static_cast<int>(j);
                 if (j < totalSamples && noteIndex < activeNote.length) {
                     // Mix with clipping protection
                     qint32 mixed = static_cast<qint32>(out[j]) + static_cast<qint32>(activeNote.data[noteIndex]);
-                    out[j] = static_cast<qint16>(qBound(-32768, mixed, 32767));
+                    out[j] = static_cast<SInt16>(qBound(-32768, mixed, 32767));
                 }
             }
             activeNote.position += static_cast<int>(samplesToMix);
         } else {
             // Sample rate conversion needed (simplified - for production use proper resampling)
             double ratio = static_cast<double>(activeNote.sampleRate) / mainWindow->outputSampleRate;
-            for (unsigned long frame = 0; frame < framesPerBuffer; ++frame) {
+            for (UInt32 frame = 0; frame < framesPerBuffer; ++frame) {
                 double noteFrame = activeNote.position / static_cast<double>(noteSamplesPerFrame) + frame * ratio;
                 int noteSampleIndex = static_cast<int>(noteFrame * noteSamplesPerFrame);
                 
                 if (noteSampleIndex < activeNote.length) {
                     for (int ch = 0; ch < samplesPerFrame && ch < noteSamplesPerFrame; ++ch) {
-                        unsigned long outIndex = frame * samplesPerFrame + ch;
+                        UInt32 outIndex = frame * samplesPerFrame + ch;
                         int noteIndex = noteSampleIndex + ch;
                         if (outIndex < totalSamples && noteIndex < activeNote.length) {
                             qint32 mixed = static_cast<qint32>(out[outIndex]) + static_cast<qint32>(activeNote.data[noteIndex]);
-                            out[outIndex] = static_cast<qint16>(qBound(-32768, mixed, 32767));
+                            out[outIndex] = static_cast<SInt16>(qBound(-32768, mixed, 32767));
                         }
                     }
                 }
@@ -551,30 +613,29 @@ int MainWindow::audioCallback(const void *inputBuffer, void *outputBuffer,
         }
     }
     
-    return paContinue;
+    return noErr;
 }
 
 void MainWindow::playNote(const QString &note)
 {
-    if (!audioBuffers.contains(note)) {
-        qWarning() << "No audio buffer found for note:" << note;
-        return;
+    // Fast path - check if note exists (no lock needed for read)
+    auto it = audioBuffers.find(note);
+    if (it == audioBuffers.end() || it->isEmpty()) {
+        return;  // Silently fail for speed
     }
     
-    QByteArray audioData = audioBuffers[note];
-    if (audioData.isEmpty()) {
-        return;
-    }
+    // Use const reference to avoid copy
+    const QByteArray &audioData = *it;
     
-    // Get audio format for this note
+    // Get audio format for this note (cached lookups, fast)
     int sampleRate = audioSampleRates.value(note, outputSampleRate);
     int channels = audioChannels.value(note, outputChannels);
     
-    // Convert QByteArray to const qint16* pointer
+    // Convert QByteArray to const qint16* pointer (no copy, just pointer)
     const qint16 *pcmData = reinterpret_cast<const qint16*>(audioData.constData());
     int sampleCount = audioData.size() / sizeof(qint16);
     
-    // Create active note
+    // Create active note on stack (fast, no allocation)
     ActiveNote activeNote;
     activeNote.note = note;
     activeNote.data = pcmData;
@@ -583,9 +644,16 @@ void MainWindow::playNote(const QString &note)
     activeNote.sampleRate = sampleRate;
     activeNote.channels = channels;
     
-    // Add to active notes list (thread-safe)
-    QMutexLocker locker(&activeNotesMutex);
-    activeNotes.append(activeNote);
+    // Add to active notes list (minimal lock time)
+    // Use tryLock first to avoid blocking if audio callback is running
+    if (activeNotesMutex.tryLock()) {
+        activeNotes.append(activeNote);
+        activeNotesMutex.unlock();
+    } else {
+        // If lock is busy (rare), wait briefly
+        QMutexLocker locker(&activeNotesMutex);
+        activeNotes.append(activeNote);
+    }
 }
 
 void MainWindow::connectKeySignals()
