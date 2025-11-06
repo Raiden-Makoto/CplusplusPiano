@@ -6,14 +6,20 @@
 #include <QList>
 #include <QVBoxLayout>
 #include <QSpacerItem>
-#include <QSoundEffect>
-#include <QUrl>
+#include <QAudioSink>
+#include <QAudioFormat>
+#include <QAudioDevice>
+#include <QMediaDevices>
+#include <QIODevice>
+#include <QFile>
+#include <QDataStream>
+#include <QTimer>
 #include <QDir>
 #include <QStandardPaths>
 #include <QFileInfo>
 #include <QCoreApplication>
-#include <QEventLoop>
 #include <QSet>
+#include <climits>
 #include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -27,11 +33,22 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Clean up sound effects
-    for (auto effectList : soundEffectPools) {
-        for (auto effect : effectList) {
-            delete effect;
+    // Clean up timers
+    for (QTimer *timer : streamTimers) {
+        if (timer) {
+            timer->stop();
+            delete timer;
         }
+    }
+    
+    // Clean up audio devices and sinks
+    for (QIODevice *device : audioDevices) {
+        if (device) {
+            device->close();
+        }
+    }
+    for (QAudioSink *sink : audioSinkPool) {
+        delete sink;
     }
 }
 
@@ -217,10 +234,118 @@ void MainWindow::setupUI()
     setCentralWidget(centralWidget);
 }
 
+QByteArray MainWindow::loadWavPcmData(const QString &filePath, QAudioFormat &format)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open WAV file:" << filePath;
+        return QByteArray();
+    }
+    
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    
+    // Read RIFF header
+    char riff[4], wave[4];
+    quint32 fileSize;
+    stream.readRawData(riff, 4);
+    stream >> fileSize;
+    stream.readRawData(wave, 4);
+    
+    if (QByteArray(riff, 4) != "RIFF" || QByteArray(wave, 4) != "WAVE") {
+        qWarning() << "Invalid WAV file format:" << filePath;
+        file.close();
+        return QByteArray();
+    }
+    
+    // Read fmt chunk to get audio format
+    char chunkId[4];
+    quint32 chunkSize;
+    quint16 audioFormat, numChannels;
+    quint32 sampleRate, byteRate;
+    quint16 blockAlign, bitsPerSample;
+    
+    bool foundFmt = false;
+    while (!stream.atEnd()) {
+        stream.readRawData(chunkId, 4);
+        stream >> chunkSize;
+        
+        if (QByteArray(chunkId, 4) == "fmt ") {
+            stream >> audioFormat;  // Should be 1 for PCM
+            stream >> numChannels;
+            stream >> sampleRate;
+            stream >> byteRate;
+            stream >> blockAlign;
+            stream >> bitsPerSample;
+            
+            // Set the audio format
+            format.setSampleRate(sampleRate);
+            format.setChannelCount(numChannels);
+            if (bitsPerSample == 16) {
+                format.setSampleFormat(QAudioFormat::Int16);
+            } else if (bitsPerSample == 8) {
+                format.setSampleFormat(QAudioFormat::UInt8);
+            } else {
+                format.setSampleFormat(QAudioFormat::Int16);  // Default
+            }
+            
+            foundFmt = true;
+            break;
+        } else {
+            // Skip this chunk
+            file.seek(file.pos() + chunkSize);
+        }
+    }
+    
+    if (!foundFmt) {
+        qWarning() << "Could not find fmt chunk in WAV file:" << filePath;
+        file.close();
+        return QByteArray();
+    }
+    
+    // Find "data" chunk
+    file.seek(12);  // Reset to after WAVE header
+    quint32 dataSize = 0;
+    qint64 dataOffset = -1;
+    
+    while (!stream.atEnd()) {
+        stream.readRawData(chunkId, 4);
+        stream >> chunkSize;
+        
+        if (QByteArray(chunkId, 4) == "data") {
+            dataOffset = file.pos();
+            dataSize = chunkSize;
+            break;
+        } else {
+            // Skip this chunk
+            file.seek(file.pos() + chunkSize);
+        }
+    }
+    
+    file.close();
+    
+    if (dataOffset == -1) {
+        qWarning() << "Could not find data chunk in WAV file:" << filePath;
+        return QByteArray();
+    }
+    
+    // Read the actual PCM data
+    if (!file.open(QIODevice::ReadOnly)) {
+        return QByteArray();
+    }
+    file.seek(dataOffset);
+    QByteArray pcmData = file.read(dataSize);
+    file.close();
+    
+    return pcmData;
+}
+
 void MainWindow::setupAudio()
 {
-    // Preload all audio files for instant playback using QSoundEffect (low latency)
-    // Get all unique notes from piano keys
+    // Get default audio output device
+    audioDevice = QMediaDevices::defaultAudioOutput();
+    
+    // Load first audio file to determine format
     QSet<QString> uniqueNotes;
     for (auto it = pianoKeys.begin(); it != pianoKeys.end(); ++it) {
         QString keyId = it.key();
@@ -228,9 +353,52 @@ void MainWindow::setupAudio()
         uniqueNotes.insert(note);
     }
     
-    // Create a pool of 3 pre-loaded effects per note for instant playback and overlapping
-    const int effectsPerNote = 3;
+    // Determine audio format from first file
+    if (!uniqueNotes.isEmpty()) {
+        QString firstNote = *uniqueNotes.begin();
+        QString wavPath = getAudioFilePath(firstNote);
+        QFileInfo fileInfo(wavPath);
+        
+        if (fileInfo.exists()) {
+            QAudioFormat tempFormat;
+            QByteArray testData = loadWavPcmData(wavPath, tempFormat);
+            if (!testData.isEmpty()) {
+                audioFormat = tempFormat;
+                qDebug() << "Audio format from file:"
+                         << "SampleRate:" << audioFormat.sampleRate()
+                         << "Channels:" << audioFormat.channelCount()
+                         << "SampleFormat:" << audioFormat.sampleFormat();
+            }
+        }
+    }
     
+    // Fallback to default format if we couldn't determine it
+    if (audioFormat.sampleRate() == 0) {
+        audioFormat.setSampleRate(44100);
+        audioFormat.setChannelCount(2);
+        audioFormat.setSampleFormat(QAudioFormat::Int16);
+    }
+    
+    // Check if format is supported, adjust if needed
+    if (!audioDevice.isFormatSupported(audioFormat)) {
+        qWarning() << "Audio format not supported, using preferred format";
+        audioFormat = audioDevice.preferredFormat();
+    }
+    
+    // Create a pool of audio sinks for overlapping playback
+    // Each sink can play one sound at a time, so we need multiple for overlapping
+    const int sinkPoolSize = 20;  // Allow up to 20 simultaneous sounds
+    for (int i = 0; i < sinkPoolSize; ++i) {
+        QAudioSink *sink = new QAudioSink(audioDevice, audioFormat, this);
+        sink->setVolume(0.5f);
+        QIODevice *device = sink->start();
+        audioSinkPool.append(sink);
+        audioDevices.append(device);
+        audioStreamBuffers.append(QByteArray());  // Empty buffer initially
+        streamTimers.append(nullptr);  // No timer initially
+    }
+    
+    // Preload all audio files into memory as PCM data
     for (const QString &note : uniqueNotes) {
         QString wavPath = getAudioFilePath(note);
         QFileInfo fileInfo(wavPath);
@@ -240,28 +408,16 @@ void MainWindow::setupAudio()
             continue;
         }
         
-        QList<QSoundEffect*> effectPool;
-        
-        // Create multiple pre-loaded effects for this note
-        for (int i = 0; i < effectsPerNote; ++i) {
-            QSoundEffect *effect = new QSoundEffect(this);
-            effect->setSource(QUrl::fromLocalFile(wavPath));
-            effect->setVolume(0.5f);
-            effect->setLoopCount(1);
-            
-            // Wait for the effect to be ready (status becomes Ready)
-            // This ensures the audio is fully loaded before first use
-            while (effect->status() != QSoundEffect::Ready) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-            }
-            
-            effectPool.append(effect);
+        // Load WAV file and extract PCM data (format should match)
+        QAudioFormat fileFormat;
+        QByteArray pcmData = loadWavPcmData(wavPath, fileFormat);
+        if (!pcmData.isEmpty()) {
+            audioBuffers[note] = pcmData;
         }
-        
-        soundEffectPools[note] = effectPool;
     }
     
-    qDebug() << "Preloaded and pre-warmed" << soundEffectPools.size() << "notes with" << effectsPerNote << "effects each";
+    qDebug() << "Preloaded" << audioBuffers.size() << "audio files into memory";
+    qDebug() << "Created" << audioSinkPool.size() << "audio sinks for overlapping playback";
 }
 
 QString MainWindow::getAudioFilePath(const QString &note)
@@ -318,34 +474,138 @@ QString MainWindow::getAudioFilePath(const QString &note)
     return possiblePaths.first();
 }
 
-void MainWindow::playNote(const QString &note)
+int MainWindow::getAvailableAudioSink()
 {
-    if (!soundEffectPools.contains(note)) {
-        qWarning() << "No sound effect pool found for note:" << note;
-        return;
-    }
-    
-    QList<QSoundEffect*> &effectPool = soundEffectPools[note];
-    
-    // Find an available (not playing) effect for instant playback
-    QSoundEffect *availableEffect = nullptr;
-    for (QSoundEffect *effect : effectPool) {
-        if (!effect->isPlaying()) {
-            availableEffect = effect;
-            break;
+    // First, try to find a completely idle sink (best case)
+    for (int i = 0; i < audioSinkPool.size(); ++i) {
+        QIODevice *device = audioDevices[i];
+        if (!device) continue;
+        
+        // Completely idle: no buffer, no timer, minimal queued data
+        bool bufferEmpty = audioStreamBuffers[i].isEmpty();
+        bool timerInactive = !streamTimers[i] || !streamTimers[i]->isActive();
+        bool deviceReady = device->bytesToWrite() < 5000;  // Less than 5KB queued
+        
+        if (bufferEmpty && timerInactive && deviceReady) {
+            return i;
         }
     }
     
-    // If all effects are busy, use the first one (will interrupt)
-    if (!availableEffect && !effectPool.isEmpty()) {
-        availableEffect = effectPool.first();
-        availableEffect->stop();
+    // If no completely idle sink, find one that's nearly done
+    // (has little data left to play)
+    for (int i = 0; i < audioSinkPool.size(); ++i) {
+        QIODevice *device = audioDevices[i];
+        if (!device) continue;
+        
+        // Nearly done: small buffer remaining and little queued
+        bool smallBuffer = audioStreamBuffers[i].size() < 50000;  // Less than 50KB remaining
+        bool littleQueued = device->bytesToWrite() < 20000;  // Less than 20KB queued
+        
+        if (smallBuffer && littleQueued) {
+            // This sink is nearly done, we can interrupt it
+            if (streamTimers[i]) {
+                streamTimers[i]->stop();
+            }
+            audioStreamBuffers[i].clear();
+            return i;
+        }
     }
     
-    if (availableEffect) {
-        // Play immediately - effect is pre-warmed and ready
-        availableEffect->play();
+    // If all sinks are busy, find the one with the least total data
+    // (buffer + queued bytes) - this allows rapid presses
+    int bestIndex = -1;
+    qint64 minTotalData = LLONG_MAX;
+    for (int i = 0; i < audioSinkPool.size(); ++i) {
+        QIODevice *device = audioDevices[i];
+        if (!device) continue;
+        
+        qint64 totalData = audioStreamBuffers[i].size() + device->bytesToWrite();
+        if (totalData < minTotalData) {
+            minTotalData = totalData;
+            bestIndex = i;
+        }
     }
+    
+    if (bestIndex >= 0) {
+        // Interrupt this sink and use it for the new note
+        if (streamTimers[bestIndex]) {
+            streamTimers[bestIndex]->stop();
+        }
+        audioStreamBuffers[bestIndex].clear();
+        return bestIndex;
+    }
+    
+    return -1;
+}
+
+void MainWindow::streamAudioData(int sinkIndex)
+{
+    if (sinkIndex < 0 || sinkIndex >= audioSinkPool.size()) {
+        return;
+    }
+    
+    QIODevice *device = audioDevices[sinkIndex];
+    if (!device) {
+        return;
+    }
+    
+    QByteArray &buffer = audioStreamBuffers[sinkIndex];
+    if (buffer.isEmpty()) {
+        // Done streaming, stop the timer
+        if (streamTimers[sinkIndex]) {
+            streamTimers[sinkIndex]->stop();
+        }
+        return;
+    }
+    
+    // Write a chunk of data (enough to fill the buffer)
+    // The audio device buffer is typically small, so we write in chunks
+    const int chunkSize = 8192;  // 8KB chunks
+    QByteArray chunk = buffer.left(chunkSize);
+    buffer.remove(0, chunk.size());
+    
+    qint64 written = device->write(chunk);
+    if (written < chunk.size()) {
+        // Buffer is full, put the data back and try again later
+        buffer.prepend(chunk.mid(written));
+    }
+}
+
+void MainWindow::playNote(const QString &note)
+{
+    if (!audioBuffers.contains(note)) {
+        qWarning() << "No audio buffer found for note:" << note;
+        return;
+    }
+    
+    // Get an available audio sink from the pool
+    int sinkIndex = getAvailableAudioSink();
+    if (sinkIndex < 0) {
+        qWarning() << "No available audio sink";
+        return;
+    }
+    
+    QIODevice *device = audioDevices[sinkIndex];
+    if (!device) {
+        qWarning() << "No device for sink";
+        return;
+    }
+    
+    // Copy the audio data to the stream buffer for this sink
+    audioStreamBuffers[sinkIndex] = audioBuffers[note];
+    
+    // Create or reuse a timer to stream the data
+    if (!streamTimers[sinkIndex]) {
+        QTimer *timer = new QTimer(this);
+        connect(timer, &QTimer::timeout, this, [this, sinkIndex]() {
+            streamAudioData(sinkIndex);
+        });
+        streamTimers[sinkIndex] = timer;
+    }
+    
+    // Start streaming immediately and continue with timer
+    streamAudioData(sinkIndex);
+    streamTimers[sinkIndex]->start(10);  // Check every 10ms to continue streaming
 }
 
 void MainWindow::connectKeySignals()

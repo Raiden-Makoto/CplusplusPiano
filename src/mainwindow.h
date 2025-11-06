@@ -7,8 +7,14 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QSoundEffect>
-#include <QUrl>
+#include <QAudioSink>
+#include <QAudioFormat>
+#include <QAudioDevice>
+#include <QMediaDevices>
+#include <QIODevice>
+#include <QByteArray>
+#include <QFile>
+#include <QTimer>
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -25,6 +31,8 @@ private:
     void setupAudio();
     void connectKeySignals();
     QString getAudioFilePath(const QString &note);
+    QByteArray loadWavPcmData(const QString &filePath, QAudioFormat &format);
+    int getAvailableAudioSink();
     
     QWidget *centralWidget;
     QWidget *pianoKeysContainer;  // Container for overlapping white and black keys
@@ -32,7 +40,15 @@ private:
     QHBoxLayout *whiteKeysLayout;
     
     QMap<QString, QPushButton*> pianoKeys;
-    QMap<QString, QList<QSoundEffect*>> soundEffectPools;  // Pool of effects per note for overlapping
+    QMap<QString, QByteArray> audioBuffers;  // Pre-loaded PCM audio data
+    QList<QAudioSink*> audioSinkPool;  // Pool of audio sinks for overlapping playback
+    QList<QIODevice*> audioDevices;  // Corresponding IO devices for each sink
+    QList<QByteArray> audioStreamBuffers;  // Remaining data to stream for each sink
+    QList<QTimer*> streamTimers;  // Timers to continue streaming data
+    QAudioFormat audioFormat;
+    QAudioDevice audioDevice;
+    
+    void streamAudioData(int sinkIndex);
 };
 
 #endif // MAINWINDOW_H

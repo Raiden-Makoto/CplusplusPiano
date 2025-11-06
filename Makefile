@@ -1282,10 +1282,22 @@ build/moc/moc_mainwindow.cpp: src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
-		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
+		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
+		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
+		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
+		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
 		build/moc/moc_predefs.h \
 		/opt/homebrew/share/qt/libexec/moc
 	/opt/homebrew/share/qt/libexec/moc $(DEFINES) --include /Users/maxcui/Downloads/CplusplusPiano/build/moc/moc_predefs.h -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/Users/maxcui/Downloads/CplusplusPiano -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtMultimedia.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtNetwork.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/opt/homebrew/lib src/mainwindow.h -o build/moc/moc_mainwindow.cpp
@@ -1320,10 +1332,22 @@ build/obj/main.o: src/main.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
-		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
+		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
+		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
+		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
+		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QApplication \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qapplication.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/main.o src/main.cpp
@@ -1340,10 +1364,22 @@ build/obj/mainwindow.o: src/mainwindow.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
-		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
-		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
-		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioSink \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiosink.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioFormat \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudioformat.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QAudioDevice \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qaudiodevice.h \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QMediaDevices \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qmediadevices.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QIODevice \
+		/opt/homebrew/lib/QtCore.framework/Headers/qiodevice.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QByteArray \
+		/opt/homebrew/lib/QtCore.framework/Headers/qbytearray.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QFile \
+		/opt/homebrew/lib/QtCore.framework/Headers/qfile.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QTimer \
+		/opt/homebrew/lib/QtCore.framework/Headers/qtimer.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QLabel \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qlabel.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/Qt \
@@ -1354,6 +1390,8 @@ build/obj/mainwindow.o: src/mainwindow.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/qlist.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QSpacerItem \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qlayoutitem.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QDataStream \
+		/opt/homebrew/lib/QtCore.framework/Headers/qdatastream.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QDir \
 		/opt/homebrew/lib/QtCore.framework/Headers/qdir.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QStandardPaths \
