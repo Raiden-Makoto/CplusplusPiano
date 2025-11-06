@@ -7,12 +7,12 @@ TEMPLATE = app
 
 # Source files
 SOURCES += \
-    main.cpp \
-    mainwindow.cpp
+    src/main.cpp \
+    src/mainwindow.cpp
 
 # Header files
 HEADERS += \
-    mainwindow.h
+    src/mainwindow.h
 
 # Resources (optional - for icons, sounds, etc.)
 # RESOURCES +=

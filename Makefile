@@ -52,8 +52,8 @@ OBJECTS_DIR   = build/obj/
 
 ####### Files
 
-SOURCES       = main.cpp \
-		mainwindow.cpp build/moc/moc_mainwindow.cpp
+SOURCES       = src/main.cpp \
+		src/mainwindow.cpp build/moc/moc_mainwindow.cpp
 OBJECTS       = build/obj/main.o \
 		build/obj/mainwindow.o \
 		build/obj/moc_mainwindow.o
@@ -427,8 +427,8 @@ DIST          = /opt/homebrew/share/qt/mkspecs/features/spec_pre.prf \
 		/opt/homebrew/share/qt/mkspecs/features/exceptions.prf \
 		/opt/homebrew/share/qt/mkspecs/features/yacc.prf \
 		/opt/homebrew/share/qt/mkspecs/features/lex.prf \
-		CplusplusPiano.pro mainwindow.h main.cpp \
-		mainwindow.cpp
+		CplusplusPiano.pro src/mainwindow.h src/main.cpp \
+		src/mainwindow.cpp
 QMAKE_TARGET  = CplusplusPiano
 DESTDIR       = build/
 TARGET        = build/CplusplusPiano.app/Contents/MacOS/CplusplusPiano
@@ -1231,8 +1231,8 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents /opt/homebrew/share/qt/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents mainwindow.h $(DISTDIR)/
-	$(COPY_FILE) --parents main.cpp mainwindow.cpp $(DISTDIR)/
+	$(COPY_FILE) --parents src/mainwindow.h $(DISTDIR)/
+	$(COPY_FILE) --parents src/main.cpp src/mainwindow.cpp $(DISTDIR)/
 
 
 clean: compiler_clean 
@@ -1270,7 +1270,7 @@ build/moc/moc_predefs.h: /opt/homebrew/share/qt/mkspecs/features/data/dummy.cpp
 compiler_moc_header_make_all: build/moc/moc_mainwindow.cpp
 compiler_moc_header_clean:
 	-$(DEL_FILE) build/moc/moc_mainwindow.cpp
-build/moc/moc_mainwindow.cpp: mainwindow.h \
+build/moc/moc_mainwindow.cpp: src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QMainWindow \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qmainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QWidget \
@@ -1282,9 +1282,13 @@ build/moc/moc_mainwindow.cpp: mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
+		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
 		build/moc/moc_predefs.h \
 		/opt/homebrew/share/qt/libexec/moc
-	/opt/homebrew/share/qt/libexec/moc $(DEFINES) --include /Users/maxcui/Downloads/CplusplusPiano/build/moc/moc_predefs.h -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/Users/maxcui/Downloads/CplusplusPiano -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtMultimedia.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtNetwork.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/opt/homebrew/lib mainwindow.h -o build/moc/moc_mainwindow.cpp
+	/opt/homebrew/share/qt/libexec/moc $(DEFINES) --include /Users/maxcui/Downloads/CplusplusPiano/build/moc/moc_predefs.h -I/opt/homebrew/share/qt/mkspecs/macx-clang -I/Users/maxcui/Downloads/CplusplusPiano -I/opt/homebrew/lib/QtWidgets.framework/Headers -I/opt/homebrew/lib/QtMultimedia.framework/Headers -I/opt/homebrew/lib/QtGui.framework/Headers -I/opt/homebrew/lib/QtNetwork.framework/Headers -I/opt/homebrew/lib/QtCore.framework/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/opt/homebrew/lib src/mainwindow.h -o build/moc/moc_mainwindow.cpp
 
 compiler_moc_objc_header_make_all:
 compiler_moc_objc_header_clean:
@@ -1304,7 +1308,7 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ####### Compile
 
-build/obj/main.o: main.cpp mainwindow.h \
+build/obj/main.o: src/main.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QMainWindow \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qmainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QWidget \
@@ -1316,11 +1320,15 @@ build/obj/main.o: main.cpp mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
+		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QApplication \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qapplication.h
-	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/main.o main.cpp
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/main.o src/main.cpp
 
-build/obj/mainwindow.o: mainwindow.cpp mainwindow.h \
+build/obj/mainwindow.o: src/mainwindow.cpp src/mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QMainWindow \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qmainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QWidget \
@@ -1332,6 +1340,10 @@ build/obj/mainwindow.o: mainwindow.cpp mainwindow.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QVBoxLayout \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qboxlayout.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QHBoxLayout \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/QSoundEffect \
+		/opt/homebrew/lib/QtMultimedia.framework/Headers/qsoundeffect.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QUrl \
+		/opt/homebrew/lib/QtCore.framework/Headers/qurl.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QLabel \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/qlabel.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/Qt \
@@ -1341,8 +1353,20 @@ build/obj/mainwindow.o: mainwindow.cpp mainwindow.h \
 		/opt/homebrew/lib/QtCore.framework/Headers/QList \
 		/opt/homebrew/lib/QtCore.framework/Headers/qlist.h \
 		/opt/homebrew/lib/QtWidgets.framework/Headers/QSpacerItem \
-		/opt/homebrew/lib/QtWidgets.framework/Headers/qlayoutitem.h
-	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/mainwindow.o mainwindow.cpp
+		/opt/homebrew/lib/QtWidgets.framework/Headers/qlayoutitem.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QDir \
+		/opt/homebrew/lib/QtCore.framework/Headers/qdir.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QStandardPaths \
+		/opt/homebrew/lib/QtCore.framework/Headers/qstandardpaths.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QFileInfo \
+		/opt/homebrew/lib/QtCore.framework/Headers/qfileinfo.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QCoreApplication \
+		/opt/homebrew/lib/QtCore.framework/Headers/qcoreapplication.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QSet \
+		/opt/homebrew/lib/QtCore.framework/Headers/qset.h \
+		/opt/homebrew/lib/QtCore.framework/Headers/QDebug \
+		/opt/homebrew/lib/QtCore.framework/Headers/qdebug.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/mainwindow.o src/mainwindow.cpp
 
 build/obj/moc_mainwindow.o: build/moc/moc_mainwindow.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o build/obj/moc_mainwindow.o build/moc/moc_mainwindow.cpp
